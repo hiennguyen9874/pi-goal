@@ -27,6 +27,7 @@
     "docs",
     "skills",
     "prompts",
+    "scripts",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -48,7 +49,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm test"
+    "smoke:package": "node scripts/package-smoke.mjs",
+    "verify": "npm run typecheck && npm test && npm run smoke:package"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",

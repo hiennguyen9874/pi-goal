@@ -30,7 +30,8 @@ test("package validation scripts are available", () => {
 
   expect(pkg.scripts?.test).toBe("vitest run");
   expect(pkg.scripts?.typecheck).toBe("tsc --noEmit");
-  expect(pkg.scripts?.verify).toBe("npm run typecheck && npm test");
+  expect(pkg.scripts?.["smoke:package"]).toBe("node scripts/package-smoke.mjs");
+  expect(pkg.scripts?.verify).toBe("npm run typecheck && npm test && npm run smoke:package");
   expect(pkg.devDependencies?.typescript).toBeDefined();
 });
 
@@ -49,6 +50,7 @@ test("package ships user-facing documentation", () => {
 
   expect(pkg.files).toContain("README.md");
   expect(pkg.files).toContain("CHANGELOG.md");
+  expect(pkg.files).toContain("scripts");
   expect(readme).toMatch(/\/goal <objective>/);
   expect(readme).toMatch(/budget_limited/);
   expect(readme).toMatch(/get_goal/);
