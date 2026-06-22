@@ -636,3 +636,28 @@ test("shutdown flushes changed active goal usage once", async () => {
 
   assert.equal(pi.entries.length, entriesAfterTurn);
 });
+
+test("create_goal replace_existing invalidates pending continuation for old goal", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const goal = activeGoal({ goalId: "old-goal" });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.agent_end[0]({ messages: [] }, ctx);
+  assert.equal(scheduled.length, 1);
+
+  await pi.tools.create_goal.execute(
+    "tool-1",
+    { objective: "Replacement", replace_existing: true },
+    undefined,
+    undefined,
+    ctx,
+  );
+
+  scheduled[0]();
+
+  assert.equal(pi.messages.some((entry) => entry.message.details?.goalId === "old-goal"), false);
+  assert.equal(pi.messages.some((entry) => /old-goal/.test(String(entry.message.content))), false);
+});

@@ -122,17 +122,18 @@ test("non-interactive replacement is rejected", async () => {
 function captureTools(initial: GoalState | null = null) {
   const tools: Record<string, any> = {};
   let goal = initial;
+  const setCalls: GoalState[] = [];
   const pi = { registerTool(tool: any) { tools[tool.name] = tool; } };
   registerGoalTools(pi as never, {
     getGoal: () => goal,
-    setGoal(next) { goal = next; },
+    setGoal(next) { goal = next; setCalls.push(next); },
     completeGoal() {
       if (!goal) throw new Error("No goal is set.");
       goal = { ...goal, status: "complete", updatedAt: 999 };
       return goal;
     },
   });
-  return { tools, getGoal: () => goal };
+  return { tools, getGoal: () => goal, setCalls };
 }
 
 test("registers canonical goal tool names", () => {
@@ -188,4 +189,35 @@ test("update_goal rejects non-complete status at execute boundary", async () => 
     /only accepts status=complete/i,
   );
   assert.equal(getGoal()?.status, "active");
+});
+
+test("create_goal exposes completion-contract guidance and replace_existing schema", () => {
+  const { tools } = captureTools();
+  const create = tools.create_goal;
+
+  assert.match(create.description, /long-running|goal/i);
+  assert.ok(create.promptGuidelines.some((line: string) => /completion contract/i.test(line)));
+  assert.ok(create.promptGuidelines.some((line: string) => /Verification evidence/i.test(line)));
+  assert.equal(create.parameters.properties.replace_existing.type, "boolean");
+});
+
+test("create_goal replaces non-terminal goals only when replace_existing is true", async () => {
+  const existing = createGoal("Existing", null, { goalId: "existing", now: 1 });
+  const { tools, getGoal } = captureTools(existing);
+
+  const duplicate = await tools.create_goal.execute("tool-1", { objective: "New" }, undefined, undefined, {});
+  assert.match(duplicate.content[0].text, /cannot create/i);
+  assert.equal(getGoal()?.goalId, "existing");
+
+  const replaced = await tools.create_goal.execute(
+    "tool-2",
+    { objective: "New", token_budget: 50, replace_existing: true },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(getGoal()?.objective, "New");
+  assert.equal(getGoal()?.tokenBudget, 50);
+  assert.notEqual(getGoal()?.goalId, "existing");
+  assert.match(replaced.content[0].text, /"objective": "New"/);
 });

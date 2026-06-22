@@ -13,8 +13,12 @@ const EmptyParams = { type: "object", properties: {}, additionalProperties: fals
 const CreateGoalParams = {
   type: "object",
   properties: {
-    objective: { type: "string", description: "Concrete objective to pursue until completion." },
+    objective: { type: "string", description: "Concrete objective to pursue until completion. Write this as a completion contract, not a task summary." },
     token_budget: { type: "integer", minimum: 1, description: "Optional positive token budget." },
+    replace_existing: {
+      type: "boolean",
+      description: "Replace an existing non-terminal goal only when the user explicitly asked to set a new goal over the current one.",
+    },
   },
   required: ["objective"],
   additionalProperties: false,
@@ -49,13 +53,20 @@ export function registerGoalTools(pi: Pick<ExtensionAPI, "registerTool">, host: 
   pi.registerTool({
     name: "create_goal",
     label: "Create Goal",
-    description: "Create one active pi-goal when no non-terminal goal exists.",
+    description: "Create one active pi-goal for a long-running objective. Use only when the user explicitly asks to start or replace a persistent goal.",
     promptSnippet: "Create one active pi-goal from an explicit user request.",
-    promptGuidelines: ["Use create_goal only when the user explicitly asks to start a persistent goal."],
+    promptGuidelines: [
+      "Use create_goal only when the user explicitly asks to start or replace a persistent goal.",
+      "Write the objective as a completion contract, not a task summary.",
+      "Include outcome, Verification evidence, constraints, boundaries, iteration policy, and blocked stop condition when they are known.",
+      "Do not set token_budget unless the user explicitly provided a budget or limit.",
+      "Use replace_existing only when the user explicitly asked to set a new goal over the current one.",
+    ],
     parameters: CreateGoalParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const current = host.getGoal();
-      if (current && current.status !== "complete" && current.status !== "cleared") {
+      const shouldReplace = (params as { replace_existing?: boolean }).replace_existing === true;
+      if (current && current.status !== "complete" && current.status !== "cleared" && !shouldReplace) {
         return textResult("Error: cannot create a new goal because this session already has a non-terminal goal.", { goal: current, error: "duplicate_goal" });
       }
       const goal = createGoal((params as { objective: string }).objective, (params as { token_budget?: number }).token_budget ?? null);

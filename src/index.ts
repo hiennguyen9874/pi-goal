@@ -285,6 +285,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     registerGoalTools(pi, {
       getGoal: () => currentGoal,
       setGoal(goal, _source, ctx) {
+        invalidateContinuation();
         persist(pi, goal, { force: true });
         syncGoalTools(pi);
         refreshStatus(ctx as ExtensionContext);
