@@ -480,6 +480,26 @@ test("goal resume schedules a hidden continuation when idle", async () => {
   scheduled[0]();
   assert.equal(pi.messages.at(-1)?.message.customType, "pi-goal-continuation");
 });
+
+test("/goal resume clears recovery attention and allows continuation", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const goal = activeGoal({ goalId: "g" });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.agent_end[0]({
+    messages: [{ role: "assistant", stopReason: "error", errorMessage: "insufficient_quota 429" }],
+  }, ctx);
+  assert.match(ctx.statuses["pi-goal"] ?? "", /needs attention/i);
+
+  await pi.commands.goal.handler("resume", ctx);
+  await pi.handlers.agent_end[0]({ messages: [] }, ctx);
+
+  assert.equal(scheduled.length > 0, true);
+  assert.doesNotMatch(ctx.statuses["pi-goal"] ?? "", /needs attention/i);
+});
 test("/goal replacement and tool replacement both cancel pending old continuation", async () => {
   const scheduled: Function[] = [];
   const pi = fakePi();

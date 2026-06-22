@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { registerGoalCommand } from "./commands.ts";
 import { formatDuration, formatFooterStatus, formatTokenValue } from "./format.ts";
+import { buildGoalUsageDelta, type UsageCarrier } from "./goal-accounting.ts";
 import { budgetLimitPrompt, continuationGoalIdFromMessage, continuationPrompt, initPrompt } from "./prompts.ts";
 import {
   CONTINUATION_MESSAGE_TYPE,
@@ -15,12 +16,12 @@ import {
 import { createGoalPersistence } from "./goal-persistence.ts";
 import { registerGoalTools } from "./tools.ts";
 import { planGoalTransition, type GoalTransitionEffect, type GoalTransitionPlan } from "./goal-transition.ts";
-import { applyGoalTransitionEffects } from "./goal-transition-effects.ts";
+import { applyGoalTransitionEffects, type GoalTransitionEffectHandlers } from "./goal-transition-effects.ts";
+import { createGoalRuntimeState } from "./runtime-state.ts";
 import { applyQueuedGoalProviderContextRewrites } from "./queued-goal-work.ts";
 import { createStaleQueuedWorkGuard, type StaleQueuedWorkEffect } from "./stale-queued-work-guard.ts";
 import { isErrorAssistantMessage } from "./recovery.ts";
 import {
-  createGoalRecoveryMachine,
   onRecoverySuccessfulTurn,
   onRecoveryUserInput,
   planRecoveryForAssistantError,
@@ -37,17 +38,6 @@ export interface GoalExtensionOptions {
 type GoalEventKind = "created" | "paused" | "resumed" | "cleared" | "completed";
 const GOAL_EVENT_MESSAGE_TYPE = "pi-goal-event";
 
-interface UsageCarrier {
-  usage?: Record<string, unknown>;
-  metadata?: { usage?: Record<string, unknown> };
-  tokens?: Record<string, unknown>;
-}
-
-function numberFrom(value: unknown): number {
-  const number = Number(value ?? 0);
-  return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : 0;
-}
-
 function textComponent(text: string) {
   return {
     render(width: number): string[] {
@@ -58,17 +48,7 @@ function textComponent(text: string) {
   };
 }
 
-export function extractTokenUsage(message: UsageCarrier | undefined): number {
-  const usage = message?.usage ?? message?.metadata?.usage ?? message?.tokens;
-  if (!usage) return 0;
-  const explicitTotal = numberFrom(usage.totalTokens ?? usage.total);
-  if (explicitTotal > 0) return explicitTotal;
-  return numberFrom(usage.input ?? usage.inputTokens ?? usage.promptTokens)
-    + numberFrom(usage.output ?? usage.outputTokens ?? usage.completionTokens)
-    + numberFrom(usage.reasoning ?? usage.reasoningTokens)
-    + numberFrom(usage.cacheRead ?? usage.cacheReadTokens)
-    + numberFrom(usage.cacheWrite ?? usage.cacheWriteTokens);
-}
+export { extractTokenUsage } from "./goal-accounting.ts";
 
 export function shouldScheduleContinuation(
   goal: GoalState | null,
@@ -98,25 +78,11 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     clock,
     statusBarEnabled: () => statusBarEnabled,
   });
-  let awaitingContinuationGoalId: string | null = null;
-  let continuationGeneration = 0;
-  let pendingContinuationGoalId: string | null = null;
-  let pendingContinuationMessage: string | null = null;
-  let pendingContinuationGeneration = 0;
-  let activeTurnStartedAt: number | null = null;
-  let currentTurnHadToolCall = false;
-  let currentTurnIsContinuation = false;
-  let pendingCompletionGoalId: string | null = null;
-  let toolsRestricted = false;
+  const runtimeState = createGoalRuntimeState();
   const staleQueuedWorkGuard = createStaleQueuedWorkGuard();
-  let currentTurnQueuedGoalId: string | null = null;
-  let currentTurnIsStaleQueuedWork = false;
-  const recoveryState = createGoalRecoveryMachine();
 
   function clearActiveTurnAccounting(): void {
-    activeTurnStartedAt = null;
-    currentTurnHadToolCall = false;
-    currentTurnIsContinuation = false;
+    runtimeState.clearActiveTurnAccounting();
   }
 
   function applyStaleQueuedWorkEffects(effects: readonly StaleQueuedWorkEffect[], ctx: ExtensionContext): void {
@@ -128,7 +94,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
   }
 
   function refreshStatus(ctx: Pick<ExtensionContext, "ui">): void {
-    ctx.ui.setStatus("pi-goal", statusBarEnabled ? formatFooterStatus(currentGoal, recoveryState.attention) : undefined);
+    ctx.ui.setStatus("pi-goal", statusBarEnabled ? formatFooterStatus(currentGoal, runtimeState.recovery.attention) : undefined);
   }
 
   function syncGoalTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
@@ -157,10 +123,9 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     const clearedGoalId = currentGoal?.goalId ?? null;
     currentGoal = null;
     persistence.appendClearEntry(clearedGoalId);
-    pendingCompletionGoalId = null;
+    runtimeState.pendingCompletionGoalId = null;
     staleQueuedWorkGuard.clear();
-    currentTurnQueuedGoalId = null;
-    currentTurnIsStaleQueuedWork = false;
+    runtimeState.clearQueuedTurnState();
   }
 
   function restore(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">, ctx: ExtensionContext): void {
@@ -173,12 +138,12 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       const data = entry.data as GoalEntry | undefined;
       if (typeof data?.statusBarEnabled === "boolean") statusBarEnabled = data.statusBarEnabled;
     }
-    awaitingContinuationGoalId = null;
-    pendingCompletionGoalId = null;
+    runtimeState.awaitingContinuationGoalId = null;
+    runtimeState.pendingCompletionGoalId = null;
     if (currentGoal?.continuationScheduled) {
       currentGoal = { ...currentGoal, continuationScheduled: false };
     }
-    continuationGeneration++;
+    runtimeState.continuationGeneration++;
     syncGoalTools(pi);
     refreshStatus(ctx);
   }
@@ -193,16 +158,36 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
   }
 
   function invalidateContinuation(): void {
-    continuationGeneration++;
-    pendingContinuationGeneration++;
-    pendingContinuationGoalId = null;
-    pendingContinuationMessage = null;
+    runtimeState.continuationGeneration++;
+    runtimeState.pendingContinuationGeneration++;
+    runtimeState.pendingContinuationGoalId = null;
+    runtimeState.pendingContinuationMessage = null;
     staleQueuedWorkGuard.clear();
-    currentTurnQueuedGoalId = null;
-    currentTurnIsStaleQueuedWork = false;
+    runtimeState.clearQueuedTurnState();
     if (currentGoal?.continuationScheduled) {
       currentGoal = { ...currentGoal, continuationScheduled: false, updatedAt: clock() };
     }
+  }
+
+  function transitionEffectHandlers(
+    pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
+    ctx: ExtensionContext,
+  ): GoalTransitionEffectHandlers {
+    return {
+      clearContinuation: invalidateContinuation,
+      clearActiveAccounting: clearActiveTurnAccounting,
+      clearPendingCompletion: () => { runtimeState.pendingCompletionGoalId = null; },
+      clearStaleQueuedWork: () => {
+        staleQueuedWorkGuard.clear();
+        runtimeState.clearQueuedTurnState();
+      },
+      resetRecovery: () => resetRecoveryMachine(runtimeState.recovery),
+      clearBudgetWarning: () => { runtimeState.budgetWarningSentForGoalId = null; },
+      // Continuation scheduling remains explicit at command/runtime call sites so the effect stays side-effect-safe.
+      markContinuationQueued: () => {},
+      syncTools: () => syncGoalTools(pi),
+      refreshUi: () => refreshStatus(ctx),
+    };
   }
 
   function applyTransitionEffects(
@@ -216,21 +201,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       return phase === "afterPersist" ? isUiEffect : !isUiEffect;
     });
 
-    applyGoalTransitionEffects(phaseEffects, {
-      clearContinuation: invalidateContinuation,
-      clearActiveAccounting: clearActiveTurnAccounting,
-      clearPendingCompletion: () => { pendingCompletionGoalId = null; },
-      clearStaleQueuedWork: () => {
-        staleQueuedWorkGuard.clear();
-        currentTurnQueuedGoalId = null;
-        currentTurnIsStaleQueuedWork = false;
-      },
-      resetRecovery: () => resetRecoveryMachine(recoveryState),
-      clearBudgetWarning: () => {},
-      markContinuationQueued: () => {},
-      syncTools: () => syncGoalTools(pi),
-      refreshUi: () => refreshStatus(ctx),
-    });
+    applyGoalTransitionEffects(phaseEffects, transitionEffectHandlers(pi, ctx));
   }
 
   function applyTransitionPlan(
@@ -255,7 +226,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
   }
 
   function hasPendingContinuation(): boolean {
-    return pendingContinuationGoalId !== null && pendingContinuationMessage !== null;
+    return runtimeState.pendingContinuationGoalId !== null && runtimeState.pendingContinuationMessage !== null;
   }
 
   function schedulePendingContinuation(
@@ -263,20 +234,20 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     ctx?: Pick<ExtensionContext, "isIdle" | "hasPendingMessages">,
   ): boolean {
     if (!hasPendingContinuation()) return false;
-    const generation = ++pendingContinuationGeneration;
+    const generation = ++runtimeState.pendingContinuationGeneration;
 
     scheduler(() => {
-      if (generation !== pendingContinuationGeneration) return;
-      if (!currentGoal || currentGoal.goalId !== pendingContinuationGoalId || currentGoal.status !== "active") return;
-      if (recoveryBlocksContinuation(recoveryState)) return;
-      if (toolsRestricted || currentGoal.continuationSuppressed) return;
+      if (generation !== runtimeState.pendingContinuationGeneration) return;
+      if (!currentGoal || currentGoal.goalId !== runtimeState.pendingContinuationGoalId || currentGoal.status !== "active") return;
+      if (recoveryBlocksContinuation(runtimeState.recovery)) return;
+      if (runtimeState.toolsRestricted || currentGoal.continuationSuppressed) return;
       if (!currentGoal.continuationScheduled) return;
       if (ctx && (!ctx.isIdle() || ctx.hasPendingMessages())) return;
 
       const goalId = currentGoal.goalId;
-      const message = pendingContinuationMessage;
-      pendingContinuationGoalId = null;
-      pendingContinuationMessage = null;
+      const message = runtimeState.pendingContinuationMessage;
+      runtimeState.pendingContinuationGoalId = null;
+      runtimeState.pendingContinuationMessage = null;
 
       currentGoal = {
         ...currentGoal,
@@ -285,7 +256,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         updatedAt: clock(),
       };
       persist(pi, currentGoal, { force: true });
-      awaitingContinuationGoalId = goalId;
+      runtimeState.awaitingContinuationGoalId = goalId;
 
       pi.sendMessage(
         {
@@ -305,14 +276,14 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     pi: Pick<ExtensionAPI, "sendMessage" | "appendEntry">,
     ctx?: Pick<ExtensionContext, "isIdle" | "hasPendingMessages">,
   ): boolean {
-    if (!shouldScheduleContinuation(currentGoal, { toolsRestricted, recoveryBlocked: recoveryBlocksContinuation(recoveryState) })) return false;
+    if (!shouldScheduleContinuation(currentGoal, { toolsRestricted: runtimeState.toolsRestricted, recoveryBlocked: recoveryBlocksContinuation(runtimeState.recovery) })) return false;
 
     currentGoal = { ...currentGoal!, continuationScheduled: true, updatedAt: clock() };
     persist(pi, currentGoal!, { force: true });
 
-    pendingContinuationGoalId = currentGoal!.goalId;
-    pendingContinuationMessage = continuationPrompt(currentGoal!);
-    continuationGeneration++;
+    runtimeState.pendingContinuationGoalId = currentGoal!.goalId;
+    runtimeState.pendingContinuationMessage = continuationPrompt(currentGoal!);
+    runtimeState.continuationGeneration++;
 
     return schedulePendingContinuation(pi, ctx);
   }
@@ -358,7 +329,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       completeGoal(_source, ctx) {
         if (!currentGoal) throw new Error("No goal is set.");
         const result = completeGoalIdempotently(currentGoal, clock());
-        if (result.changed) pendingCompletionGoalId = currentGoal.goalId;
+        if (result.changed) runtimeState.pendingCompletionGoalId = currentGoal.goalId;
         refreshStatus(ctx as ExtensionContext);
         return result.goal;
       },
@@ -415,7 +386,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       restore(pi, ctx);
       flushRuntimePersistence(pi);
       if (currentGoal?.status === "active") {
-        const action = planRecoveryForSilentContextOverflow(recoveryState);
+        const action = planRecoveryForSilentContextOverflow(runtimeState.recovery);
         if (action.type === "pause") {
           const plan = planGoalTransition(currentGoal, {
             kind: "recovery_pause",
@@ -427,16 +398,16 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
           return;
         }
       }
-      if (!recoveryBlocksContinuation(recoveryState)) ensurePendingContinuation(pi, ctx);
+      if (!recoveryBlocksContinuation(runtimeState.recovery)) ensurePendingContinuation(pi, ctx);
     });
     pi.on("before_agent_start", (event) => {
       const activeTools = new Set(pi.getActiveTools());
       const hasMutatingTool = activeTools.has("edit") || activeTools.has("write") || activeTools.has("bash");
-      toolsRestricted = !hasMutatingTool;
+      runtimeState.toolsRestricted = !hasMutatingTool;
     });
     pi.on("input", (event) => {
       if (event.source === "extension" || !currentGoal) return { action: "continue" };
-      onRecoveryUserInput(recoveryState);
+      onRecoveryUserInput(runtimeState.recovery);
       invalidateContinuation();
       if (currentGoal.status === "active") {
         currentGoal = {
@@ -452,8 +423,8 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       return { action: "continue" };
     });
     pi.on("turn_start", (event, ctx) => {
-      activeTurnStartedAt = event.timestamp ?? clock();
-      currentTurnHadToolCall = false;
+      runtimeState.activeTurnStartedAt = event.timestamp ?? clock();
+      runtimeState.currentTurnHadToolCall = false;
       
       const eventAny = event as unknown as { details?: { goalId?: unknown }; message?: string };
       const queuedGoalId = typeof eventAny.details?.goalId === "string"
@@ -461,27 +432,27 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         : typeof eventAny.message === "string"
           ? continuationGoalIdFromMessage(eventAny.message)
           : null;
-      currentTurnQueuedGoalId = queuedGoalId;
+      runtimeState.currentTurnQueuedGoalId = queuedGoalId;
 
       const plan = staleQueuedWorkGuard.planTurnStart({
         queuedGoalId,
         currentGoalId: currentGoal?.goalId ?? null,
         currentStatus: currentGoal?.status ?? null,
       });
-      currentTurnIsStaleQueuedWork = plan.stale;
+      runtimeState.currentTurnIsStaleQueuedWork = plan.stale;
 
       if (plan.stale) {
         applyStaleQueuedWorkEffects(plan.effects, ctx);
-        currentTurnIsContinuation = false;
+        runtimeState.currentTurnIsContinuation = false;
         return;
       }
       
       // Normal case: not stale
-      currentTurnIsContinuation = currentGoal?.goalId === awaitingContinuationGoalId;
-      if (currentGoal?.goalId === awaitingContinuationGoalId) awaitingContinuationGoalId = null;
+      runtimeState.currentTurnIsContinuation = currentGoal?.goalId === runtimeState.awaitingContinuationGoalId;
+      if (currentGoal?.goalId === runtimeState.awaitingContinuationGoalId) runtimeState.awaitingContinuationGoalId = null;
     });
     pi.on("turn_end", (event, ctx) => {
-      if (currentTurnIsStaleQueuedWork) {
+      if (runtimeState.currentTurnIsStaleQueuedWork) {
         clearActiveTurnAccounting();
         syncGoalTools(pi);
         refreshStatus(ctx);
@@ -494,19 +465,19 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         return;
       }
 
-      const elapsedSeconds = activeTurnStartedAt === null ? 0 : Math.max(0, Math.floor((clock() - activeTurnStartedAt) / 1000));
-      const tokensDelta = extractTokenUsage(event.message as UsageCarrier | undefined);
-      const accountingNow = Math.max(clock(), currentGoal.updatedAt);
-      const result = applyGoalUsage(currentGoal, {
-        tokensDelta,
-        secondsDelta: elapsedSeconds,
-        hadToolCall: currentTurnHadToolCall,
-        wasContinuation: currentTurnIsContinuation,
-        now: accountingNow,
+      const now = clock();
+      const accountingNow = Math.max(now, currentGoal.updatedAt);
+      const usageDelta = buildGoalUsageDelta({
+        message: event.message as UsageCarrier | undefined,
+        turnStartedAt: runtimeState.activeTurnStartedAt,
+        now,
+        hadToolCall: runtimeState.currentTurnHadToolCall,
+        wasContinuation: runtimeState.currentTurnIsContinuation,
       });
-      const isCompleting = pendingCompletionGoalId === result.goal.goalId;
+      const result = applyGoalUsage(currentGoal, { ...usageDelta, now: accountingNow });
+      const isCompleting = runtimeState.pendingCompletionGoalId === result.goal.goalId;
       const transitionPlan = isCompleting
-        ? planGoalTransition(result.goal, { kind: "complete", now: Math.max(clock(), result.goal.updatedAt) })
+        ? planGoalTransition(result.goal, { kind: "complete", now: Math.max(now, result.goal.updatedAt) })
         : planGoalTransition(currentGoal, { kind: "runtime_accounting", nextGoal: result.goal });
       applyTransitionPlan(pi, transitionPlan, ctx, { force: isCompleting || result.crossedBudget });
       const nextGoal = transitionPlan.nextGoal!;
@@ -535,11 +506,10 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       }
     });
     pi.on("agent_end", (event, ctx) => {
-      const agentEndPlan = staleQueuedWorkGuard.planAgentEnd({ queuedGoalId: currentTurnQueuedGoalId });
+      const agentEndPlan = staleQueuedWorkGuard.planAgentEnd({ queuedGoalId: runtimeState.currentTurnQueuedGoalId });
       if (agentEndPlan.skipContinuation) {
         applyStaleQueuedWorkEffects(agentEndPlan.effects, ctx);
-        currentTurnQueuedGoalId = null;
-        currentTurnIsStaleQueuedWork = false;
+        runtimeState.clearQueuedTurnState();
         syncGoalTools(pi);
         refreshStatus(ctx);
         return;
@@ -550,7 +520,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       const errorMessages = messages.filter(isErrorAssistantMessage);
       const lastError = errorMessages.at(-1);
       if (lastError) {
-        const action = planRecoveryForAssistantError(recoveryState, lastError);
+        const action = planRecoveryForAssistantError(runtimeState.recovery, lastError);
         if (action.type === "pending") {
           refreshStatus(ctx);
           syncGoalTools(pi);
@@ -571,25 +541,23 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       const lastAssistant = [...messages].reverse().find((message) => {
         return Boolean(message && typeof message === "object" && (message as { role?: unknown }).role === "assistant");
       });
-      if (lastAssistant) onRecoverySuccessfulTurn(recoveryState, lastAssistant);
+      if (lastAssistant) onRecoverySuccessfulTurn(runtimeState.recovery, lastAssistant);
 
       ensurePendingContinuation(pi, ctx);
       syncGoalTools(pi);
       refreshStatus(ctx);
     });
     pi.on("tool_execution_end", () => {
-      currentTurnHadToolCall = true;
+      runtimeState.currentTurnHadToolCall = true;
     });
     pi.on("session_shutdown", () => {
       flushRuntimePersistence(pi);
       invalidateContinuation();
-      awaitingContinuationGoalId = null;
-      activeTurnStartedAt = null;
-      currentTurnHadToolCall = false;
-      currentTurnIsContinuation = false;
-      pendingCompletionGoalId = null;
-      pendingContinuationGoalId = null;
-      pendingContinuationMessage = null;
+      runtimeState.awaitingContinuationGoalId = null;
+      runtimeState.clearActiveTurnAccounting();
+      runtimeState.pendingCompletionGoalId = null;
+      runtimeState.pendingContinuationGoalId = null;
+      runtimeState.pendingContinuationMessage = null;
     });
     (pi.on as (event: string, handler: (event: { messages: unknown[] }) => unknown) => void)("context", (event) => {
       const result = applyQueuedGoalProviderContextRewrites(event.messages as Parameters<typeof applyQueuedGoalProviderContextRewrites>[0], currentGoal);
