@@ -11,13 +11,14 @@ import {
   goalEntry,
   goalsEquivalent,
   reconstructGoal,
-  transitionGoal,
   applyGoalUsage,
   completeGoalIdempotently,
   type GoalEntry,
   type GoalState,
 } from "./state.ts";
 import { registerGoalTools } from "./tools.ts";
+import { planGoalTransition, type GoalTransitionEffect, type GoalTransitionPlan } from "./goal-transition.ts";
+import { applyGoalTransitionEffects } from "./goal-transition-effects.ts";
 import { applyQueuedGoalProviderContextRewrites } from "./queued-goal-work.ts";
 import { createStaleQueuedWorkGuard, type StaleQueuedWorkEffect } from "./stale-queued-work-guard.ts";
 
@@ -189,10 +190,50 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     }
   }
 
-  function invalidateReplacementRuntime(): void {
-    invalidateContinuation();
-    clearActiveTurnAccounting();
-    pendingCompletionGoalId = null;
+  function applyTransitionEffects(
+    pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
+    effects: readonly GoalTransitionEffect[],
+    ctx: ExtensionContext,
+    phase: "beforePersist" | "afterPersist",
+  ): void {
+    const phaseEffects = effects.filter((effect) => {
+      const isUiEffect = effect.type === "syncTools" || effect.type === "refreshUi" || effect.type === "markContinuationQueued";
+      return phase === "afterPersist" ? isUiEffect : !isUiEffect;
+    });
+
+    applyGoalTransitionEffects(phaseEffects, {
+      clearContinuation: invalidateContinuation,
+      clearActiveAccounting: clearActiveTurnAccounting,
+      clearPendingCompletion: () => { pendingCompletionGoalId = null; },
+      clearStaleQueuedWork: () => {
+        staleQueuedWorkGuard.clear();
+        currentTurnQueuedGoalId = null;
+        currentTurnIsStaleQueuedWork = false;
+      },
+      resetRecovery: () => {},
+      clearBudgetWarning: () => {},
+      markContinuationQueued: () => {},
+      syncTools: () => syncGoalTools(pi),
+      refreshUi: () => refreshStatus(ctx),
+    });
+  }
+
+  function applyTransitionPlan(
+    pi: Pick<ExtensionAPI, "appendEntry" | "getActiveTools" | "setActiveTools">,
+    plan: GoalTransitionPlan,
+    ctx: ExtensionContext,
+    options?: { force?: boolean },
+  ): void {
+    applyTransitionEffects(pi, plan.effects, ctx, "beforePersist");
+    if (plan.persist === "set" || plan.persist === "usage") {
+      if (!plan.nextGoal) throw new Error("Transition plan requires a goal to persist.");
+      persist(pi, plan.nextGoal, { force: options?.force ?? plan.persist === "set" });
+    } else if (plan.persist === "clear") {
+      clear(pi);
+    } else if (plan.nextGoal) {
+      currentGoal = plan.nextGoal;
+    }
+    applyTransitionEffects(pi, plan.effects, ctx, "afterPersist");
   }
 
   function hasPendingContinuation(): boolean {
@@ -291,10 +332,8 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     registerGoalTools(pi, {
       getGoal: () => currentGoal,
       setGoal(goal, _source, ctx) {
-        invalidateReplacementRuntime();
-        persist(pi, goal, { force: true });
-        syncGoalTools(pi);
-        refreshStatus(ctx as ExtensionContext);
+        const plan = planGoalTransition(currentGoal, { kind: "create_or_replace", nextGoal: goal, source: "tool" });
+        applyTransitionPlan(pi, plan, ctx as ExtensionContext, { force: true });
       },
       completeGoal(_source, ctx) {
         if (!currentGoal) throw new Error("No goal is set.");
@@ -311,11 +350,15 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         const previousGoal = currentGoal;
         const previousStatus = previousGoal?.status ?? null;
         const isNewGoal = previousGoal?.goalId !== goal.goalId;
-        invalidateContinuation();
-        persist(pi, goal, { force: true });
+        const plan = isNewGoal
+          ? planGoalTransition(previousGoal, { kind: "create_or_replace", nextGoal: goal, source: "command" })
+          : previousStatus === "active" && goal.status === "paused"
+            ? planGoalTransition(previousGoal, { kind: "pause", now: goal.updatedAt })
+            : previousStatus !== "active" && goal.status === "active"
+              ? planGoalTransition(previousGoal, { kind: "resume", now: goal.updatedAt })
+              : planGoalTransition(previousGoal, { kind: "create_or_replace", nextGoal: goal, source: "command" });
+        applyTransitionPlan(pi, plan, ctx as ExtensionContext, { force: true });
 
-        syncGoalTools(pi);
-        refreshStatus(ctx as ExtensionContext);
         if (isNewGoal) emitGoalEvent(pi, "created", goal);
         if (!isNewGoal && previousStatus === "active" && goal.status === "paused") emitGoalEvent(pi, "paused", goal);
         if (!isNewGoal && previousStatus !== "active" && goal.status === "active") emitGoalEvent(pi, "resumed", goal);
@@ -327,10 +370,8 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       },
       clearGoal(_source, ctx) {
         const clearedGoal = currentGoal;
-        invalidateContinuation();
-        clear(pi);
-        syncGoalTools(pi);
-        refreshStatus(ctx as ExtensionContext);
+        const plan = planGoalTransition(currentGoal, { kind: "clear" });
+        applyTransitionPlan(pi, plan, ctx as ExtensionContext);
         emitGoalEvent(pi, "cleared", clearedGoal);
       },
       setStatusBar(value, _source, ctx) {
@@ -344,9 +385,8 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     pi.on("session_start", (event, ctx) => {
       restore(pi, ctx);
       if (event.reason === "reload" && currentGoal?.status === "active") {
-        currentGoal = transitionGoal(currentGoal, "paused", clock());
-        persist(pi, currentGoal, { force: true });
-        refreshStatus(ctx);
+        const plan = planGoalTransition(currentGoal, { kind: "pause", now: clock() });
+        applyTransitionPlan(pi, plan, ctx, { force: true });
         ctx.ui.notify(`Goal paused after reload: ${currentGoal.objective}. Use /goal resume to continue.`);
       }
     });
@@ -422,20 +462,20 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
 
       const elapsedSeconds = activeTurnStartedAt === null ? 0 : Math.max(0, Math.floor((clock() - activeTurnStartedAt) / 1000));
       const tokensDelta = extractTokenUsage(event.message as UsageCarrier | undefined);
+      const accountingNow = Math.max(clock(), currentGoal.updatedAt);
       const result = applyGoalUsage(currentGoal, {
         tokensDelta,
         secondsDelta: elapsedSeconds,
         hadToolCall: currentTurnHadToolCall,
         wasContinuation: currentTurnIsContinuation,
-        now: clock(),
+        now: accountingNow,
       });
       const isCompleting = pendingCompletionGoalId === result.goal.goalId;
-      const nextGoal = isCompleting
-        ? transitionGoal(result.goal, "complete", clock())
-        : result.goal;
-      if (isCompleting) pendingCompletionGoalId = null;
-      persist(pi, nextGoal, { force: isCompleting || result.crossedBudget });
-      syncGoalTools(pi);
+      const transitionPlan = isCompleting
+        ? planGoalTransition(result.goal, { kind: "complete", now: Math.max(clock(), result.goal.updatedAt) })
+        : planGoalTransition(currentGoal, { kind: "runtime_accounting", nextGoal: result.goal });
+      applyTransitionPlan(pi, transitionPlan, ctx, { force: isCompleting || result.crossedBudget });
+      const nextGoal = transitionPlan.nextGoal!;
       if (isCompleting) {
         emitGoalEvent(pi, "completed", nextGoal);
         const parts: string[] = [`Goal achieved: ${nextGoal.objective}`];
@@ -459,7 +499,6 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       if (result.goal.continuationSuppressed && !isCompleting && !result.crossedBudget) {
         ctx.ui.notify("Goal continuation paused: no progress detected. Send a message or /goal resume to continue.", "warning");
       }
-      refreshStatus(ctx);
     });
     pi.on("agent_end", (event, ctx) => {
       const agentEndPlan = staleQueuedWorkGuard.planAgentEnd({ queuedGoalId: currentTurnQueuedGoalId });

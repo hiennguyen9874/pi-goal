@@ -405,6 +405,29 @@ test("goal resume schedules a hidden continuation when idle", async () => {
   scheduled[0]();
   assert.equal(pi.messages.at(-1)?.message.customType, "pi-goal-continuation");
 });
+test("/goal replacement and tool replacement both cancel pending old continuation", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const goal = activeGoal({ goalId: "old-goal" });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.agent_end[0]({ messages: [] }, ctx);
+  assert.equal(scheduled.length, 1);
+
+  await pi.commands.goal.handler("Replacement", ctx);
+  scheduled[0]();
+  assert.equal(pi.messages.some((entry) => entry.message.details?.goalId === "old-goal"), false);
+
+  await pi.handlers.agent_end[0]({ messages: [] }, ctx);
+  const secondScheduled = scheduled.at(-1);
+  assert.ok(secondScheduled);
+  await pi.tools.create_goal.execute("tool-1", { objective: "Tool replacement", replace_existing: true }, undefined, undefined, ctx);
+  secondScheduled();
+  assert.equal(pi.messages.some((entry) => entry.message.details?.goalId === "old-goal"), false);
+});
+
 
 test("update_goal duplicate complete is idempotent", async () => {
   const pi = fakePi();
