@@ -40,10 +40,7 @@
   },
   "dependencies": {},
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.74.0",
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "@earendil-works/pi-tui": "*",
-    "@sinclair/typebox": "*"
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "scripts": {
     "test": "vitest run",

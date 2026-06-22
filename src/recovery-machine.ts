@@ -102,7 +102,3 @@ export function planRecoveryForSilentContextOverflow(state: GoalRecoveryMachineS
 export function recoveryBlocksContinuation(state: GoalRecoveryMachineState): boolean {
   return state.needsUserStartTurn || state.attention?.kind === "paused" || state.attention?.kind === "pending";
 }
-
-export function requireRecoveryUserStart(state: GoalRecoveryMachineState): void {
-  state.needsUserStartTurn = true;
-}

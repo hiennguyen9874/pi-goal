@@ -1,6 +1,5 @@
 export const CONTEXT_OVERFLOW_SIGNATURE = "context_overflow";
 export const MAX_CONTEXT_COMPACTION_RETRIES = 1;
-export const HOST_OVERFLOW_RECOVERY_REASON = "recovering from context overflow";
 
 export interface AssistantErrorMessage {
   role: string;

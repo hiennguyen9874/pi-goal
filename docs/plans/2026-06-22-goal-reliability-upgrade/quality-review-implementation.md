@@ -10,24 +10,21 @@
 - None.
 
 ## Important
-### Transition effect advertises queued continuation but handler is a no-op
-- Files: `src/goal-transition.ts:96-105`, `src/index.ts:184-188`, `src/index.ts:356-359`
-- Problem: The transition planner emits `markContinuationQueued` on resume, but the runtime handler intentionally does nothing. Resume only actually schedules continuation through a separate explicit command-path call in `registerGoalCommand`.
-- Why it matters: This weakens the transition/effects seam: tests can assert that an effect exists while the runtime effect has no behavior. A future tool/runtime caller that applies the transition plan but does not remember the extra explicit scheduling call will silently fail to queue continuation after resume.
-- Minimal fix: Either remove `markContinuationQueued` from the transition/effects model and keep scheduling explicit everywhere, or implement the handler so applying a resume transition is sufficient to mark/schedule the pending continuation. The smaller fix is to remove the misleading effect and test the explicit scheduling path.
+- None remaining.
 
-### Unused peer dependencies remain declared
-- Files: `package.json:42-47`
-- Problem: `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, and `@sinclair/typebox` are declared as peer dependencies, but the tracked source only imports `@earendil-works/pi-coding-agent`.
-- Why it matters: Peer dependencies affect package installation and host compatibility expectations. Declaring unused peers creates unnecessary install warnings/requirements and undermines the package-hygiene goal.
-- Minimal fix: Remove unused peer dependencies, or add a short justification if Pi package policy requires them. Keep only peers actually required by this extension at runtime.
+## Resolved Issues
+### Removed misleading queued-continuation transition effect
+- Files: `src/goal-transition.ts`, `src/goal-transition-effects.ts`, `src/index.ts`, `src/goal-transition.test.ts`, `src/goal-transition-effects.test.ts`
+- Resolution: Removed `markContinuationQueued` from the transition/effects model. Resume continuation scheduling remains explicit at the command/runtime call site, so tests no longer assert a no-op effect.
+
+### Removed unused peer dependencies
+- Files: `package.json`
+- Resolution: Removed unused peer dependencies and kept only `@earendil-works/pi-coding-agent`, which is the only peer imported by tracked source.
 
 ## Suggestions
-### Remove unused recovery/runtime fields and constants
-- Files: `src/runtime-state.ts:16`, `src/runtime-state.ts:36`, `src/index.ts:185`, `src/recovery.ts:3`, `src/recovery-machine.ts:106-108`
-- Observation: `budgetWarningSentForGoalId`, `HOST_OVERFLOW_RECOVERY_REASON`, and `requireRecoveryUserStart` are present but not used by tracked runtime code.
-- Benefit: Reduces cognitive load in reliability-sensitive state handling and avoids implying incomplete budget-warning or host-overflow flows.
-- Suggested refinement: Delete these until a current behavior needs them, or wire them into an actual tested path.
+### Removed unused recovery/runtime fields and constants
+- Files: `src/runtime-state.ts`, `src/index.ts`, `src/recovery.ts`, `src/recovery-machine.ts`, `src/runtime-state.test.ts`
+- Resolution: Deleted the unused budget-warning runtime slot, host-overflow recovery constant, and unused recovery helper. The `clearBudgetWarning` transition handler remains as an idempotent no-op until a real warning state is introduced.
 
 ### Keep direct current-goal mutation on a cleanup list
 - Files: `src/index.ts:160-169`, `src/index.ts:252-258`, `src/index.ts:281-286`, `src/index.ts:408-420`
@@ -43,5 +40,5 @@
 - Spec alignment note: this is a quality review using the provided design as context; it does not constitute a full phase-by-phase requirements approval.
 
 ## Quality Verdict
-- Pass with issues
-- Reason: The implementation is broadly correct, well tested, and appropriately modular for the requested reliability upgrade. No merge-blocking correctness bugs were found. The misleading no-op transition effect and unused peer dependencies should be cleaned up because they create real maintainability/package risks, but they do not currently break the verified behavior.
+- Pass
+- Reason: The implementation is well tested, appropriately modular for the requested reliability upgrade, and the previously reported maintainability/package issues have been resolved.

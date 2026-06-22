@@ -18,7 +18,6 @@ export type GoalTransitionEffect =
   | { type: "clearStaleQueuedWork" }
   | { type: "resetRecovery" }
   | { type: "clearBudgetWarning" }
-  | { type: "markContinuationQueued"; goalId: string }
   | { type: "syncTools" }
   | { type: "refreshUi" };
 
@@ -99,7 +98,6 @@ export function planGoalTransition(current: GoalState | null, request: GoalTrans
       const nextGoal = transitionGoal(goal, "active", request.now);
       add({ type: "resetRecovery" });
       add({ type: "clearBudgetWarning" });
-      add({ type: "markContinuationQueued", goalId: nextGoal.goalId });
       add({ type: "syncTools" });
       add({ type: "refreshUi" });
       return { nextGoal, persist: goalsEquivalent(goal, nextGoal) ? "skip" : "set", effects };

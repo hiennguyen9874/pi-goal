@@ -7,7 +7,6 @@ export interface GoalTransitionEffectHandlers {
   clearStaleQueuedWork(): void;
   resetRecovery(): void;
   clearBudgetWarning(): void;
-  markContinuationQueued(goalId: string): void;
   syncTools(): void;
   refreshUi(): void;
 }
@@ -17,7 +16,6 @@ export function applyGoalTransitionEffects(
   handlers: GoalTransitionEffectHandlers,
 ): void {
   for (const effect of effects) {
-    if (effect.type === "markContinuationQueued") handlers.markContinuationQueued(effect.goalId);
-    else handlers[effect.type]();
+    handlers[effect.type]();
   }
 }

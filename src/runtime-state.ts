@@ -6,6 +6,7 @@ export interface GoalRuntimeState {
   pendingContinuationGoalId: string | null;
   pendingContinuationMessage: string | null;
   pendingContinuationGeneration: number;
+  activeTurnGoalId: string | null;
   activeTurnStartedAt: number | null;
   currentTurnHadToolCall: boolean;
   currentTurnIsContinuation: boolean;
@@ -13,7 +14,6 @@ export interface GoalRuntimeState {
   toolsRestricted: boolean;
   currentTurnQueuedGoalId: string | null;
   currentTurnIsStaleQueuedWork: boolean;
-  budgetWarningSentForGoalId: string | null;
   recovery: GoalRecoveryMachineState;
   clearActiveTurnAccounting(): void;
   clearQueuedTurnState(): void;
@@ -26,6 +26,7 @@ export function createGoalRuntimeState(): GoalRuntimeState {
     pendingContinuationGoalId: null,
     pendingContinuationMessage: null,
     pendingContinuationGeneration: 0,
+    activeTurnGoalId: null,
     activeTurnStartedAt: null,
     currentTurnHadToolCall: false,
     currentTurnIsContinuation: false,
@@ -33,9 +34,9 @@ export function createGoalRuntimeState(): GoalRuntimeState {
     toolsRestricted: false,
     currentTurnQueuedGoalId: null,
     currentTurnIsStaleQueuedWork: false,
-    budgetWarningSentForGoalId: null,
     recovery: createGoalRecoveryMachine(),
     clearActiveTurnAccounting() {
+      state.activeTurnGoalId = null;
       state.activeTurnStartedAt = null;
       state.currentTurnHadToolCall = false;
       state.currentTurnIsContinuation = false;

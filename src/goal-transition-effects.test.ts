@@ -12,16 +12,14 @@ test("applyGoalTransitionEffects invokes each handler once in order", () => {
     clearStaleQueuedWork: () => calls.push("clearStaleQueuedWork"),
     resetRecovery: () => calls.push("resetRecovery"),
     clearBudgetWarning: () => calls.push("clearBudgetWarning"),
-    markContinuationQueued: (goalId) => calls.push(`markContinuationQueued:${goalId}`),
     syncTools: () => calls.push("syncTools"),
     refreshUi: () => calls.push("refreshUi"),
   };
 
   applyGoalTransitionEffects([
     { type: "clearContinuation" },
-    { type: "markContinuationQueued", goalId: "g" },
     { type: "refreshUi" },
   ], handlers);
 
-  assert.deepEqual(calls, ["clearContinuation", "markContinuationQueued:g", "refreshUi"]);
+  assert.deepEqual(calls, ["clearContinuation", "refreshUi"]);
 });

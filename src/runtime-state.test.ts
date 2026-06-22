@@ -10,6 +10,7 @@ test("runtime state initializes all mutable runtime slots", () => {
   assert.equal(state.continuationGeneration, 0);
   assert.equal(state.pendingContinuationGoalId, null);
   assert.equal(state.pendingContinuationMessage, null);
+  assert.equal(state.activeTurnGoalId, null);
   assert.equal(state.activeTurnStartedAt, null);
   assert.equal(state.currentTurnHadToolCall, false);
   assert.equal(state.currentTurnIsContinuation, false);
@@ -17,18 +18,19 @@ test("runtime state initializes all mutable runtime slots", () => {
   assert.equal(state.toolsRestricted, false);
   assert.equal(state.currentTurnQueuedGoalId, null);
   assert.equal(state.currentTurnIsStaleQueuedWork, false);
-  assert.equal(state.budgetWarningSentForGoalId, null);
   assert.equal(state.recovery.attention, null);
 });
 
 test("clearActiveTurnAccounting resets per-turn accounting fields", () => {
   const state = createGoalRuntimeState();
+  state.activeTurnGoalId = "g";
   state.activeTurnStartedAt = 100;
   state.currentTurnHadToolCall = true;
   state.currentTurnIsContinuation = true;
 
   state.clearActiveTurnAccounting();
 
+  assert.equal(state.activeTurnGoalId, null);
   assert.equal(state.activeTurnStartedAt, null);
   assert.equal(state.currentTurnHadToolCall, false);
   assert.equal(state.currentTurnIsContinuation, false);

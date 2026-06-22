@@ -65,7 +65,7 @@ test("pause active goal persists set and clears continuation/accounting/recovery
   ]);
 });
 
-test("resume paused goal clears suppression and queues continuation effect", () => {
+test("resume paused goal clears suppression without queuing transition effect", () => {
   const current = activeGoal({ status: "paused", continuationSuppressed: true, lastContinuationHadToolCall: false });
   const plan = planGoalTransition(current, { kind: "resume", now: 200 });
 
@@ -76,7 +76,6 @@ test("resume paused goal clears suppression and queues continuation effect", () 
   assert.deepEqual(effectTypes(plan.effects), [
     "resetRecovery",
     "clearBudgetWarning",
-    "markContinuationQueued",
     "syncTools",
     "refreshUi",
   ]);

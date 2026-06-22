@@ -823,9 +823,10 @@ test("create_goal replace_existing clears in-flight turn accounting", async () =
     .map((entry) => entry.data as any)
     .find((entry) => entry.action === "set" && entry.goal?.objective === "Replacement");
   const latest = pi.entries.at(-1)?.data as any;
-  const latestGoal = latest.action === "usage" ? latest : latest.goal;
   assert.equal(replacementSet?.goal.objective, "Replacement");
-  assert.equal(latestGoal.tokensUsed, 50);
-  assert.equal(latestGoal.timeUsedSeconds, 0);
-  assert.equal(latestGoal.turnCount, 1);
+  assert.equal(latest.action, "set");
+  assert.equal(latest.goal.objective, "Replacement");
+  assert.equal(latest.goal.tokensUsed, 0);
+  assert.equal(latest.goal.timeUsedSeconds, 0);
+  assert.equal(latest.goal.turnCount, 0);
 });

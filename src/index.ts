@@ -182,9 +182,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         runtimeState.clearQueuedTurnState();
       },
       resetRecovery: () => resetRecoveryMachine(runtimeState.recovery),
-      clearBudgetWarning: () => { runtimeState.budgetWarningSentForGoalId = null; },
-      // Continuation scheduling remains explicit at command/runtime call sites so the effect stays side-effect-safe.
-      markContinuationQueued: () => {},
+      clearBudgetWarning: () => {},
       syncTools: () => syncGoalTools(pi),
       refreshUi: () => refreshStatus(ctx),
     };
@@ -197,7 +195,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     phase: "beforePersist" | "afterPersist",
   ): void {
     const phaseEffects = effects.filter((effect) => {
-      const isUiEffect = effect.type === "syncTools" || effect.type === "refreshUi" || effect.type === "markContinuationQueued";
+      const isUiEffect = effect.type === "syncTools" || effect.type === "refreshUi";
       return phase === "afterPersist" ? isUiEffect : !isUiEffect;
     });
 
@@ -424,6 +422,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     });
     pi.on("turn_start", (event, ctx) => {
       runtimeState.activeTurnStartedAt = event.timestamp ?? clock();
+      runtimeState.activeTurnGoalId = currentGoal?.status === "active" ? currentGoal.goalId : null;
       runtimeState.currentTurnHadToolCall = false;
       
       const eventAny = event as unknown as { details?: { goalId?: unknown }; message?: string };
@@ -459,7 +458,8 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         return;
       }
 
-      if (currentGoal?.status !== "active") {
+      if (currentGoal?.status !== "active" || runtimeState.activeTurnGoalId !== currentGoal.goalId) {
+        clearActiveTurnAccounting();
         syncGoalTools(pi);
         refreshStatus(ctx);
         return;
