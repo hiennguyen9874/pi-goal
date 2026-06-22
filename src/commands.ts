@@ -1,5 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
+import { copyTextToClipboard, type ClipboardHostLike } from "./clipboard.ts";
+
 import { formatFooterStatus, goalToolText } from "./format.ts";
 import {
   canPauseGoal,
@@ -12,12 +14,12 @@ import {
 } from "./state.ts";
 
 export type GoalCommand =
-  | { action: "status" | "pause" | "resume" | "clear" }
+  | { action: "status" | "pause" | "resume" | "clear" | "copy" }
   | { action: "statusbar"; value: "on" | "off" | "toggle" }
-  | { action: "create"; objective: string; tokenBudget: number | null };
-
-export type GoalCommandContext = Pick<ExtensionCommandContext, "hasUI" | "ui" | "isIdle" | "hasPendingMessages">;
-
+  | { action: "create"; objective: string; tokenBudget: number | null }
+export type GoalCommandContext = Pick<ExtensionCommandContext, "hasUI" | "ui" | "isIdle" | "hasPendingMessages"> & {
+  clipboard?: { writeText?: (text: string) => void | Promise<void> };
+};
 export interface GoalCommandHost {
   getGoal(): GoalState | null;
   setGoal(goal: GoalState, source: "command", ctx: GoalCommandContext): void;
@@ -28,11 +30,10 @@ export interface GoalCommandHost {
 export function parseGoalCommand(args: string): GoalCommand {
   const trimmed = args.trim();
   if (trimmed === "" || trimmed === "status") return { action: "status" };
-  if (trimmed === "pause" || trimmed === "resume" || trimmed === "clear") return { action: trimmed };
+  if (trimmed === "pause" || trimmed === "resume" || trimmed === "clear" || trimmed === "copy") return { action: trimmed };
   if (trimmed === "statusbar") return { action: "statusbar", value: "toggle" };
   if (trimmed === "statusbar on") return { action: "statusbar", value: "on" };
   if (trimmed === "statusbar off") return { action: "statusbar", value: "off" };
-
   let objective = trimmed;
   let budgetText: string | undefined;
   const equals = objective.match(/\s--(?:budget|tokens)=([^\s]+)\s*$/);
@@ -79,6 +80,17 @@ export async function handleGoalCommand(
       return;
     }
 
+    if (parsed.action === "copy") {
+      if (!current) {
+        ctx.ui.notify("No goal is set.", "info");
+        return;
+      }
+      const result = await copyTextToClipboard(current.objective, ctx as unknown as ClipboardHostLike);
+      if (result.ok) ctx.ui.notify("Goal objective copied.", "info");
+      else ctx.ui.notify(`Clipboard unavailable: ${result.message}`, "warning");
+      return;
+    }
+
     if (parsed.action === "pause" || parsed.action === "resume") {
       if (!current) {
         ctx.ui.notify("No goal is set.", "warning");
@@ -120,7 +132,7 @@ export function registerGoalCommand(pi: { registerCommand: Function }, host: Goa
   pi.registerCommand("goal", {
     description: "Set, inspect, pause, resume, or clear a long-running pi-goal objective.",
     getArgumentCompletions(prefix: string) {
-      const values = ["status", "pause", "resume", "clear", "statusbar", "statusbar on", "statusbar off"];
+      const values = ["status", "pause", "resume", "clear", "copy", "statusbar", "statusbar on", "statusbar off"];
       const matches = values.filter((value) => value.startsWith(prefix.trim()));
       return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
     },

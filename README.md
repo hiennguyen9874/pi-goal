@@ -13,6 +13,7 @@ Persistent goal tracking for Pi: `/goal` creates one long-running objective, hid
 | `/goal resume` | Resume a paused goal. |
 | `/goal clear` | Clear the current goal. |
 | `/goal statusbar [on|off]` | Toggle footer status display. |
+| `/goal copy` | Copy the current goal objective to the clipboard when supported by the host. |
 
 ## Lifecycle States
 

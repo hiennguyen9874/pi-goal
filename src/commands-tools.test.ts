@@ -5,11 +5,12 @@ import { handleGoalCommand, parseGoalCommand } from "./commands.ts";
 import { createGoal, type GoalState } from "./state.ts";
 import { registerGoalTools } from "./tools.ts";
 
-function makeCtx(hasUI = true) {
+function makeCtx(hasUI = true, clipboard?: { writeText?: (text: string) => void | Promise<void> }) {
   const notifications: Array<{ message: string; level?: string }> = [];
   return {
     hasUI,
     notifications,
+    clipboard,
     ui: {
       async confirm() { return true; },
       notify(message: string, level?: string) { notifications.push({ message, level }); },
@@ -47,6 +48,7 @@ test("parses goal command actions and budget forms", () => {
   assert.deepEqual(parseGoalCommand("Ship it --budget=2M"), { action: "create", objective: "Ship it", tokenBudget: 2000000 });
   assert.deepEqual(parseGoalCommand("Ship it --tokens 10k"), { action: "create", objective: "Ship it", tokenBudget: 10000 });
   assert.deepEqual(parseGoalCommand("Ship it --tokens=3M"), { action: "create", objective: "Ship it", tokenBudget: 3000000 });
+  assert.deepEqual(parseGoalCommand("copy"), { action: "copy" });
 });
 
 test("/goal creates an active goal", async () => {
@@ -221,3 +223,37 @@ test("create_goal replaces non-terminal goals only when replace_existing is true
   assert.notEqual(getGoal()?.goalId, "existing");
   assert.match(replaced.content[0].text, /"objective": "New"/);
 });
+
+test("/goal copy copies current objective", async () => {
+  let copied = "";
+  const host = makeHost(createGoal("Build feature", null, { goalId: "g", now: 1 }));
+  const ctx = makeCtx(true, { writeText(text) { copied = text; } });
+
+  await handleGoalCommand(host, "copy", ctx as never);
+
+  assert.equal(copied, "Build feature");
+  assert.equal(host.getGoal()?.objective, "Build feature");
+  assert.match(ctx.notifications.at(-1)?.message ?? "", /copied/i);
+});
+
+test("/goal copy warns when no goal exists", async () => {
+  let copied = "";
+  const host = makeHost(null);
+  const ctx = makeCtx(true, { writeText(text) { copied = text; } });
+
+  await handleGoalCommand(host, "copy", ctx as never);
+
+  assert.equal(copied, "");
+  assert.match(ctx.notifications.at(-1)?.message ?? "", /No goal/i);
+});
+
+test("/goal copy warns when clipboard is unavailable", async () => {
+  const host = makeHost(createGoal("Build feature", null, { goalId: "g", now: 1 }));
+  const ctx = makeCtx();
+
+  await handleGoalCommand(host, "copy", ctx as never);
+
+  assert.equal(host.getGoal()?.objective, "Build feature");
+  assert.match(ctx.notifications.at(-1)?.message ?? "", /Clipboard.*unavailable/i);
+});
+
