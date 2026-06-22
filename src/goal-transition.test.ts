@@ -142,3 +142,24 @@ test("complete active goal persists set and clears terminal runtime state", () =
     "refreshUi",
   ]);
 });
+
+test("recovery_pause pauses active goal and clears unsafe runtime work", () => {
+  const current = activeGoal({ continuationScheduled: true });
+  const plan = planGoalTransition(current, {
+    kind: "recovery_pause",
+    reason: "non-retryable provider error",
+    now: 200,
+  });
+
+  assert.equal(plan.persist, "set");
+  assert.equal(plan.nextGoal?.status, "paused");
+  assert.deepEqual(effectTypes(plan.effects), [
+    "clearContinuation",
+    "clearActiveAccounting",
+    "clearPendingCompletion",
+    "clearStaleQueuedWork",
+    "clearBudgetWarning",
+    "syncTools",
+    "refreshUi",
+  ]);
+});

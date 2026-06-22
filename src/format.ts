@@ -1,5 +1,5 @@
+import { formatRecoveryAttention, type RecoveryAttention } from "./recovery.ts";
 import type { GoalState } from "./state.ts";
-
 export interface GoalToolRecord {
   goalId: string;
   objective: string;
@@ -45,7 +45,9 @@ function budgetUsage(goal: GoalState): string {
   return `${formatTokenValue(goal.tokensUsed)} / ${formatTokenValue(goal.tokenBudget)}`;
 }
 
-export function formatFooterStatus(goal: GoalState | null): string | undefined {
+export function formatFooterStatus(goal: GoalState | null, recoveryAttention: RecoveryAttention | null = null): string | undefined {
+  const recovery = formatRecoveryAttention(recoveryAttention);
+  if (recovery) return recovery;
   if (!goal || goal.status === "cleared") return undefined;
   if (goal.status === "active") {
     return goal.tokenBudget === null

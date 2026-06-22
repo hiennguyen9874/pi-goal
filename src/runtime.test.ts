@@ -319,6 +319,40 @@ test("read-only active tool restrictions block continuation scheduling", async (
   assert.equal(scheduled.length, 0);
 });
 
+test("pending recovery blocks automatic continuation", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const goal = activeGoal({ goalId: "g" });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.agent_end[0]({
+    messages: [{ role: "assistant", stopReason: "error", errorMessage: "websocket closed" }],
+  }, ctx);
+
+  assert.equal(scheduled.length, 0);
+  assert.match(ctx.statuses["pi-goal"] ?? "", /recovery pending/i);
+});
+
+test("non-retryable provider error pauses active goal and cancels continuation", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const goal = activeGoal({ goalId: "g" });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.agent_end[0]({
+    messages: [{ role: "assistant", stopReason: "error", errorMessage: "insufficient_quota 429" }],
+  }, ctx);
+
+  const latest = pi.entries.at(-1)?.data as any;
+  assert.equal(latest.goal.status, "paused");
+  assert.match(ctx.statuses["pi-goal"] ?? "", /needs attention/i);
+  assert.equal(scheduled.length, 0);
+});
+
 test("session_shutdown invalidates pending continuation", async () => {
   const scheduled: Function[] = [];
   const pi = fakePi();

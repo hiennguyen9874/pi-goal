@@ -26,6 +26,7 @@ import {
   formatTokenValue,
   goalToolResponse,
 } from "./format.ts";
+import { createRecoveryPausedAttention, createRecoveryPendingAttention } from "./recovery.ts";
 
 function activeGoal(overrides: Partial<GoalState> = {}): GoalState {
   return {
@@ -315,6 +316,17 @@ test("formats footer status for each visible state", () => {
   assert.equal(formatFooterStatus(activeGoal({ status: "paused" })), "Goal paused (/goal resume)");
   assert.equal(formatFooterStatus(activeGoal({ status: "budget_limited", tokenBudget: 100, tokensUsed: 120 })), "Goal unmet (120 / 100 tokens)");
   assert.equal(formatFooterStatus(activeGoal({ status: "complete", tokenBudget: 1000, tokensUsed: 800 })), "Goal achieved (800 tokens)");
+});
+
+test("footer status surfaces recovery attention before normal goal status", () => {
+  assert.match(
+    formatFooterStatus(activeGoal(), createRecoveryPendingAttention("provider error (websocket closed)")) ?? "",
+    /Goal recovery pending/,
+  );
+  assert.match(
+    formatFooterStatus(activeGoal({ status: "paused" }), createRecoveryPausedAttention("non-retryable provider error")) ?? "",
+    /Goal needs attention/,
+  );
 });
 
 test("formats tool response and completion budget report", () => {
