@@ -25,6 +25,8 @@
   "files": [
     "src",
     "docs",
+    "skills",
+    "prompts",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -32,7 +34,8 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ]
+    ],
+    "prompts": ["./prompts"]
   },
   "dependencies": {},
   "peerDependencies": {

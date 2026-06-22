@@ -54,3 +54,18 @@ test("package ships user-facing documentation", () => {
   expect(readme).toMatch(/get_goal/);
   expect(changelog).toMatch(/Goal Reliability Upgrade/);
 });
+
+test("package exposes goal-writing skill and create-goal prompt", () => {
+  const pkg = readPackageJson();
+  const skill = readFileSync("skills/pi-goal-writer/SKILL.md", "utf8");
+  const prompt = readFileSync("prompts/create-goal.md", "utf8");
+
+  expect(pkg.files).toContain("skills");
+  expect(pkg.files).toContain("prompts");
+  expect(pkg.pi?.prompts).toContain("./prompts");
+  expect(skill).toMatch(/completion contract/i);
+  expect(skill).toMatch(/Outcome/);
+  expect(skill).toMatch(/Verification surface/);
+  expect(prompt).toMatch(/replace_existing/);
+  expect(prompt).toMatch(/token budget/i);
+});
