@@ -206,20 +206,24 @@ export function isGoalState(value: unknown): value is GoalState {
   return goal.version === 1 && typeof goal.goalId === "string" && typeof goal.objective === "string";
 }
 
+function isValidUsageNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 export function isGoalEntry(value: unknown): value is GoalEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Partial<GoalEntry>;
-  if (entry.version !== 1 || typeof entry.at !== "number") return false;
+  if (entry.version !== 1 || !isValidUsageNumber(entry.at)) return false;
   if (entry.action === "clear") return true;
   if (entry.action === "set") return isGoalState(entry.goal);
   if (entry.action !== "usage") return false;
   return typeof entry.goalId === "string"
     && (entry.status === "active" || entry.status === "budget_limited")
-    && typeof entry.tokensUsed === "number"
-    && typeof entry.timeUsedSeconds === "number"
-    && typeof entry.turnCount === "number"
-    && typeof entry.continuationCount === "number"
-    && typeof entry.updatedAt === "number";
+    && isValidUsageNumber(entry.tokensUsed)
+    && isValidUsageNumber(entry.timeUsedSeconds)
+    && isValidUsageNumber(entry.turnCount)
+    && isValidUsageNumber(entry.continuationCount)
+    && isValidUsageNumber(entry.updatedAt);
 }
 
 function canApplyRuntimeUsageEntry(goal: GoalState, entry: GoalUsageEntry): boolean {

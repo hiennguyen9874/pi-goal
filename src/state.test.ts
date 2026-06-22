@@ -262,6 +262,43 @@ test("budget_limited runtime usage requires usage at or over budget", () => {
   assert.equal(reconstructed?.updatedAt, 3000);
 });
 
+test("runtime usage entries ignore non-finite numeric fields", () => {
+  const goal = activeGoal({ goalId: "g", tokensUsed: 10, updatedAt: 1000 });
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: ENTRY_TYPE, data: goalEntry(goal, 1000) },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "active",
+        tokensUsed: Number.NaN,
+        timeUsedSeconds: 20,
+        turnCount: 2,
+        continuationCount: 1,
+        updatedAt: 2000,
+      }, 2000),
+    },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "active",
+        tokensUsed: 20,
+        timeUsedSeconds: Number.POSITIVE_INFINITY,
+        turnCount: 2,
+        continuationCount: 1,
+        updatedAt: 3000,
+      }, 3000),
+    },
+  ]);
+
+  assert.equal(reconstructed?.tokensUsed, 10);
+  assert.equal(reconstructed?.timeUsedSeconds, 0);
+  assert.equal(reconstructed?.updatedAt, 1000);
+});
+
 test("formats duration and token values compactly", () => {
   assert.equal(formatDuration(0), "0s");
   assert.equal(formatDuration(75), "1m 15s");

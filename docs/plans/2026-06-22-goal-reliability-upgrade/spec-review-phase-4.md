@@ -10,24 +10,24 @@
 - Required focused runtime behaviors are tested: accounting can persist a `usage` entry after an initial `set`, and completion still persists a full complete `set` (`src/runtime.test.ts:171-207`).
 
 ## Requirement Mismatches
-- **Important - problematic deviation: malformed numeric usage entries are not fully rejected.**
+- **Important - fixed: malformed numeric usage entries are now rejected.**
   - Explicit requirement: Phase 4 says malformed entries should be skipped consistently with robust reconstruction behavior, and the design says runtime usage replay should be defensive.
-  - Evidence: `isGoalEntry()` accepts usage numeric fields using only `typeof ... === "number"` (`src/state.ts:216-222`). `canApplyRuntimeUsageEntry()` then only compares the values with `<` (`src/state.ts:229-236`), and `reconstructGoal()` assigns those values into goal state (`src/state.ts:253-259`). Values such as `NaN` are `typeof "number"`, all `<` comparisons with `NaN` are false, and would therefore be applied instead of skipped.
-  - Why it matters: a malformed custom entry can corrupt restored counters/status timestamps, contradicting the replay-hardening intent.
-  - Minimal fix: require finite numeric usage fields in `isGoalEntry()` or `canApplyRuntimeUsageEntry()` with `Number.isFinite(...)`, and preferably add non-negative/integer checks for counters and timestamps.
-- **Observation - acceptable tradeoff: `src/index.ts` still mirrors `currentGoal` outside the persistence module.**
+  - Verification: confirmed `isGoalEntry()` previously accepted non-finite numbers via `typeof ... === "number"`, allowing malformed `usage` entries to be replayed.
+  - Fix: added finite, non-negative numeric validation for usage entry numeric fields and entry `at` in `src/state.ts`. Added a regression test covering `NaN` and `Infinity` usage fields in `src/state.test.ts`.
+  - Status: fixed.
+- **Observation - deferred: `src/index.ts` still mirrors `currentGoal` outside the persistence module.**
   - Explicit plan text said to replace local persistence fields “where practical” and allowed preserving local helper names if a full extraction was too risky.
   - Evidence: local `currentGoal` remains in `src/index.ts:78`, while persistence also has its own current goal (`src/goal-persistence.ts:31`) and is synchronized by helper calls (`src/index.ts:139-141`, `src/index.ts:156-158`).
-  - Classification: acceptable tradeoff, because the phase allowed partial delegation and tests cover the main runtime paths. This should be revisited in phase 6 runtime integration cleanup.
+  - Decision: defer to phase 6 runtime integration cleanup. This is an acceptable phase-4 tradeoff and not a verified correctness bug.
 
 ## Plan Deviations
 - None blocking.
-- **Acceptable tradeoff:** Task 2 requested `GoalPersistenceSource = "set" | "runtime" | "clear"`; the type exists (`src/goal-persistence.ts:17`), but `persistCurrent()` accepts only `"set" | "runtime"` (`src/goal-persistence.ts:78`) and clear is handled by `appendClearEntry()` (`src/goal-persistence.ts:89-95`). This matches the required method list and behavior, so no fix is required.
-- **Acceptable tradeoff:** Task 3 suggested removing/delegating local persistence fields in `src/index.ts`. The implementation delegates persisted snapshot and runtime timestamp to `createGoalPersistence()` but keeps local `currentGoal`. This is allowed by the phase note permitting lower-risk incremental integration.
+- **Rejected/no fix:** Task 2 requested `GoalPersistenceSource = "set" | "runtime" | "clear"`; the type exists (`src/goal-persistence.ts:17`), but `persistCurrent()` accepts only `"set" | "runtime"` (`src/goal-persistence.ts:78`) and clear is handled by `appendClearEntry()` (`src/goal-persistence.ts:89-95`). This matches the required method list and behavior, so no fix is required.
+- **Deferred/no fix:** Task 3 suggested removing/delegating local persistence fields in `src/index.ts`. The implementation delegates persisted snapshot and runtime timestamp to `createGoalPersistence()` but keeps local `currentGoal`. This is allowed by the phase note permitting lower-risk incremental integration and is deferred to phase 6.
 
 ## Scope Creep / Missing Scope
 - No material scope creep found. The implementation did not add recovery, smoke gate, or unrelated lifecycle features beyond a small transition persist-result update needed by phase 4.
-- Missing scope is limited to the malformed numeric replay guard noted above. Required core behaviors for usage replay, persistence fallback, runtime integration, and completion full-set persistence are present.
+- Missing scope from the original report has been fixed: malformed numeric replay guards now reject non-finite and negative usage numeric fields before reconstruction can apply them.
 
 ## Tests vs Required Behavior
 - Covered:
@@ -35,19 +35,19 @@
   - Mismatched goal ID ignored (`src/state.test.ts`).
   - Decreasing usage and `updatedAt` rewind ignored (`src/state.test.ts`).
   - Budget-limited usage requires usage at or over budget (`src/state.test.ts`).
+  - Malformed numeric usage entries such as `NaN` and `Infinity` are skipped (`src/state.test.ts`).
   - Runtime persistence writes `usage` when static fields match (`src/goal-persistence.test.ts`).
   - Runtime persistence falls back to `set` when static fields change (`src/goal-persistence.test.ts`).
   - Runtime turn accounting persists `usage` and completion persists full `set` (`src/runtime.test.ts:171-207`).
-- Gap:
-  - No test covers malformed numeric usage fields such as `NaN`, `Infinity`, negative timestamps, or non-finite counters. This is the same replay-hardening mismatch described above.
+- Gap: none remaining for the reviewed phase-4 findings.
 - Verification run during review:
   - `npm test -- src/state.test.ts src/goal-persistence.test.ts src/runtime.test.ts` passed: 56 tests passed.
   - `npm run typecheck` passed.
   - `npm test` passed: 104 tests passed.
 
 ## Spec Alignment Verdict
-- Pass with issues
-- Reason: Phase 4’s primary behavior is implemented and verified, but replay hardening is incomplete for malformed numeric usage entries. This does not invalidate the main feature, but it should be fixed before considering the phase fully robust against malformed journal data.
+- Pass after fixes
+- Reason: Phase 4’s primary behavior is implemented and verified, and the malformed numeric replay-hardening gap identified by this report has been fixed.
 
 ## Required Fixes
-1. Harden `usage` entry validation so malformed numeric values cannot be applied during reconstruction. Add regression tests for at least `NaN` or non-finite usage fields being skipped.
+1. Fixed - hardened `usage` entry validation so malformed numeric values cannot be applied during reconstruction, with regression coverage for non-finite usage fields.
