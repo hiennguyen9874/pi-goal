@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 
 import piGoalExtension, { createGoalExtension } from "./index.ts";
@@ -660,4 +660,32 @@ test("create_goal replace_existing invalidates pending continuation for old goal
 
   assert.equal(pi.messages.some((entry) => entry.message.details?.goalId === "old-goal"), false);
   assert.equal(pi.messages.some((entry) => /old-goal/.test(String(entry.message.content))), false);
+});
+
+test("create_goal replace_existing clears in-flight turn accounting", async () => {
+  const pi = fakePi();
+  let time = 1000;
+  createGoalExtension({ clock: () => time }).register(pi as never);
+  const goal = activeGoal({ goalId: "old-goal" });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.turn_start[0]({ timestamp: 1000 }, ctx);
+  await pi.handlers.tool_execution_end[0]({ toolName: "edit" }, ctx);
+  time = 4000;
+  await pi.tools.create_goal.execute(
+    "tool-1",
+    { objective: "Replacement", replace_existing: true },
+    undefined,
+    undefined,
+    ctx,
+  );
+  await pi.handlers.turn_end[0]({ message: { role: "assistant", usage: { totalTokens: 50 } } }, ctx);
+
+  const latestGoal = (pi.entries.at(-1)?.data as any).goal;
+  assert.equal(latestGoal.objective, "Replacement");
+  assert.equal(latestGoal.tokensUsed, 50);
+  assert.equal(latestGoal.timeUsedSeconds, 0);
+  assert.equal(latestGoal.turnCount, 1);
+  assert.equal(latestGoal.lastContinuationHadToolCall, false);
 });

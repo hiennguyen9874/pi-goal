@@ -11,46 +11,41 @@
 - Plan phase count is within the design cap for a large feature: the plan has 7 phases, matching the `large <= 7` cap.
 
 ## Requirement Mismatches
-- **Problematic deviation: tool replacement does not clear all required runtime state.**
-  - Explicit requirement: design says replacing a goal must clear pending continuation state, active accounting, stale queued work state, pending completion state, and recovery state; Phase 2 Task 2 also says tool-created replacement must rely on `src/index.ts` to clear runtime state.
-  - Evidence: tool `setGoal` calls only `invalidateContinuation()`, `persist()`, `syncGoalTools()`, and `refreshStatus()` (`src/index.ts:285-292`). `invalidateContinuation()` clears continuation generation/pending message/stale queued work fields, but it does not call `clearActiveTurnAccounting()` and does not clear `pendingCompletionGoalId` (`src/index.ts:179-190`). The active accounting fields and pending completion field are defined at `src/index.ts:90-93`, and the only local helper that clears active accounting is `clearActiveTurnAccounting()` at `src/index.ts:99-103`.
-  - Why it matters: if `create_goal` with `replace_existing` is called during an active turn, the replacement goal can inherit elapsed-time/tool-call accounting from the prior goal at `turn_end` (`src/index.ts:417-431`). Pending completion state from a prior goal also remains until a later turn-end comparison clears or ignores it, contrary to the explicit invalidation contract.
-  - Classification: problematic deviation.
-  - Required fix: add a shared replacement/runtime-invalidation path that clears pending continuation, stale queued work, active turn accounting, and pending completion before persisting the replacement goal. Recovery reset can be added when recovery state exists in a later phase, but current replacement code should be structured so that reset has a single obvious place.
+- **Fixed: tool replacement now clears required runtime state.**
+  - Status: fixed.
+  - Verification decision: verified real in `src/index.ts`; tool replacement previously invalidated continuation state but did not clear active turn accounting or `pendingCompletionGoalId`.
+  - Fix applied: added `invalidateReplacementRuntime()` in `src/index.ts` to clear pending continuation/stale queued work state, active turn accounting, and pending completion state before persisting a tool-created replacement. Added regression coverage in `src/runtime.test.ts` for in-flight elapsed/tool-call accounting.
 
 ## Plan Deviations
-- **Problematic deviation: prescribed focused test commands do not run as specified.**
-  - Explicit phase requirement: Phase 2 repeatedly says to run `npm test -- src/commands-tools.test.ts`, `npm test -- src/runtime.test.ts`, and the combined focused command, with expected PASS.
-  - Evidence: `vitest.config.ts` includes only `src/package-manifest.test.ts`, so `npm test -- src/commands-tools.test.ts` exits with `No test files found, exiting with code 1`. The declared `npm test` command therefore does not execute `src/commands-tools.test.ts` or `src/runtime.test.ts`.
-  - Classification: problematic deviation.
-  - Required fix: make the project’s declared test command run the intended co-located test suite, either by converting Node `node:test` tests to Vitest-compatible tests and widening `vitest.config.ts`, or by updating scripts/verification to run both Vitest and Node test files.
+- **Fixed: prescribed focused test commands now run as specified.**
+  - Status: fixed.
+  - Verification decision: verified real by running `npm test -- src/runtime.test.ts`, which failed with `No test files found` under the previous `vitest.config.ts` include.
+  - Fix applied: widened Vitest include to `src/*.test.ts` and converted co-located Node `node:test` imports to Vitest `test` imports so `npm test -- src/commands-tools.test.ts`, `npm test -- src/runtime.test.ts`, full `npm test`, and `npm run verify` execute the intended suites.
 - **Acceptable tradeoff: Phase 2 does not route command/tool replacement through the future transition/effects seam.**
-  - Explicit phase note: Task 2 says Phase 3 will route command and tool replacement through transition effects.
-  - Evidence: command and tool paths still use local runtime helpers in `src/index.ts:285-321`.
-  - Classification: acceptable tradeoff for Phase 2, as long as Phase 3 completes the shared transition path.
+  - Status: deferred.
+  - Reason: verified as intentionally scheduled for Phase 3. Current Phase 2 fix adds a small runtime invalidation seam without pre-implementing the full transition/effects architecture.
 - **Cannot verify: Pi packaged prompt support.**
-  - Explicit phase note: stop for human review if Pi package prompt support differs from `pi.prompts: ["./prompts"]`.
-  - Evidence checked: manifest declares the field (`package.json:34-39`), but no host/API compatibility check is present in this phase.
-  - Classification: observation; not a mismatch unless the target Pi package format rejects this field.
+  - Status: deferred.
+  - Reason: no local host/API compatibility check is available in this phase. Manifest still declares `pi.prompts: ["./prompts"]`; stop for human review if target Pi package support differs.
 
 ## Scope Creep / Missing Scope
-- **Missing required replacement invalidation scope:** active accounting and pending completion invalidation are missing from the tool replacement path, as detailed above.
+- **Fixed required replacement invalidation scope:** active accounting and pending completion invalidation are now cleared from the tool replacement path via `invalidateReplacementRuntime()`.
 - **No unjustified feature creep found:** the implementation did not add shell clipboard fallbacks, new dependencies, unrelated refactors, or visible tool-created/replaced events. That matches the phase constraints.
-- **Recovery reset not currently checkable:** Phase/design mention recovery reset on replacement, but recovery state is scheduled for Phase 5 and does not exist in current runtime state. This should be carried forward as a Phase 5/transition seam requirement, not treated as a current code omission beyond ensuring the invalidation seam is extensible.
+- **Recovery reset not currently checkable:** Status: deferred. Phase/design mention recovery reset on replacement, but recovery state is scheduled for Phase 5 and does not exist in current runtime state.
 
 ## Tests vs Required Behavior
 - `npm test -- src/package-manifest.test.ts`: PASS, 5 tests.
-- `npm test -- src/commands-tools.test.ts`: FAIL before running tests; Vitest reports no matching test files because `vitest.config.ts` includes only `src/package-manifest.test.ts`.
+- `npm test -- src/commands-tools.test.ts`: PASS, 18 tests.
+- `npm test -- src/runtime.test.ts`: PASS, 32 tests.
+- `npm test -- src/commands-tools.test.ts src/runtime.test.ts`: PASS, 50 tests.
+- `npm test`: PASS, 7 files / 86 tests.
 - `npm run typecheck`: PASS.
-- `node --test src/commands-tools.test.ts`: PASS, 18 tests. This confirms the added command/tool tests pass under Node’s test runner, but it is not the phase-prescribed command.
-- `node --test src/runtime.test.ts`: PASS, 31 tests. This confirms the pending-continuation regression passes under Node’s test runner, but it does not cover active accounting or pending completion invalidation.
-- `npm test`: PASS, but only runs `src/package-manifest.test.ts`; this is weaker than the phase/full-suite intent.
-- `npm run verify`: PASS, but because it delegates to the same narrow `npm test`, it does not verify command/tool/runtime behavior.
+- `npm run verify`: PASS; runs typecheck and the full Vitest suite.
 
 ## Spec Alignment Verdict
-- Fail
-- Reason: Most user-facing Phase 2 features are present, but a required safety behavior for tool replacement is incomplete, and the phase-prescribed test commands do not run the intended test files. These are spec/plan alignment issues, not style concerns.
+- Pass after fixes
+- Reason: Verified replacement invalidation and test-command setup issues are fixed; deferred items are explicitly scheduled or not locally verifiable in Phase 2.
 
 ## Required Fixes
-1. Update the tool-created replacement runtime path to clear active turn accounting and pending completion state in addition to queued continuation and stale queued work state. Add regression coverage that would fail if a replacement goal inherits elapsed time/tool-call accounting from the old goal’s in-flight turn.
-2. Fix the declared test/verification setup so `npm test -- src/commands-tools.test.ts`, `npm test -- src/runtime.test.ts`, `npm test`, and `npm run verify` execute the intended command/tool/runtime tests, not only `src/package-manifest.test.ts`.
+1. Fixed. Tool-created replacement now clears active turn accounting and pending completion state in addition to queued continuation and stale queued work state; regression coverage verifies a replacement does not inherit elapsed/tool-call accounting from the old goal’s in-flight turn.
+2. Fixed. Declared test/verification setup now runs the intended co-located Vitest suite for focused commands, full `npm test`, and `npm run verify`.

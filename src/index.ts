@@ -189,6 +189,12 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     }
   }
 
+  function invalidateReplacementRuntime(): void {
+    invalidateContinuation();
+    clearActiveTurnAccounting();
+    pendingCompletionGoalId = null;
+  }
+
   function hasPendingContinuation(): boolean {
     return pendingContinuationGoalId !== null && pendingContinuationMessage !== null;
   }
@@ -285,7 +291,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     registerGoalTools(pi, {
       getGoal: () => currentGoal,
       setGoal(goal, _source, ctx) {
-        invalidateContinuation();
+        invalidateReplacementRuntime();
         persist(pi, goal, { force: true });
         syncGoalTools(pi);
         refreshStatus(ctx as ExtensionContext);
