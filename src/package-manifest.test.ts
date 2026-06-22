@@ -41,3 +41,16 @@ test("package no longer ships unused hashline runtime dependencies", () => {
   expect(pkg.dependencies?.["file-type"]).toBeUndefined();
   expect(pkg.dependencies?.["xxhash-wasm"]).toBeUndefined();
 });
+
+test("package ships user-facing documentation", () => {
+  const pkg = readPackageJson();
+  const readme = readFileSync("README.md", "utf8");
+  const changelog = readFileSync("CHANGELOG.md", "utf8");
+
+  expect(pkg.files).toContain("README.md");
+  expect(pkg.files).toContain("CHANGELOG.md");
+  expect(readme).toMatch(/\/goal <objective>/);
+  expect(readme).toMatch(/budget_limited/);
+  expect(readme).toMatch(/get_goal/);
+  expect(changelog).toMatch(/Goal Reliability Upgrade/);
+});
