@@ -1,7 +1,7 @@
 {
   "name": "pi-goal",
   "version": "0.1.0",
-  "description": "pi-goal extension",
+  "description": "Persistent goal tracking for pi with long-running objective continuations, budgets, and completion auditing.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hiennguyen9874/pi-goal.git"
@@ -13,16 +13,20 @@
   "keywords": [
     "pi-package",
     "pi",
+    "pi-extension",
     "coding-agent",
     "extension",
-    "hashline"
+    "goal",
+    "goals",
+    "persistent-goals",
+    "long-running-tasks"
   ],
   "license": "MIT",
   "files": [
-    "extensions",
     "src",
-    "tool-descriptions",
+    "docs",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "pi": {
@@ -30,11 +34,7 @@
       "./src/index.ts"
     ]
   },
-  "dependencies": {
-    "diff": "^8.0.2",
-    "file-type": "^21.3.4",
-    "xxhash-wasm": "^1.1.0"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.74.0",
     "@earendil-works/pi-coding-agent": ">=0.74.0",
@@ -43,12 +43,15 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
     "@types/node": "^22.0.0",
     "ajv": "^8.20.0",
+    "typescript": "^5.0.0",
     "vitest": "^3.0.0"
   }
 }
