@@ -592,6 +592,25 @@ test("session_compact retries continuation delivery from restored active goal st
   assert.equal(pi.messages.filter((m) => m.message?.customType === "pi-goal-continuation").length, 1);
 });
 
+test("repeated session_compact pauses active goal recovery and blocks continuation", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const goal = activeGoal({ continuationScheduled: true });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.session_compact[0]({}, ctx);
+  await pi.handlers.session_compact[0]({}, ctx);
+
+  const latest = pi.entries.at(-1)?.data as any;
+  assert.equal(latest.goal.status, "paused");
+  assert.match(ctx.statuses["pi-goal"] ?? "", /needs attention/i);
+  assert.equal(scheduled.length, 1);
+  scheduled[0]();
+  assert.equal(pi.messages.filter((m) => m.message?.customType === "pi-goal-continuation").length, 0);
+});
+
 test("stale continuation after goal replacement does not charge replacement goal or requeue", async () => {
   const scheduled: Function[] = [];
   const pi = fakePi();

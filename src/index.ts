@@ -24,6 +24,7 @@ import {
   onRecoverySuccessfulTurn,
   onRecoveryUserInput,
   planRecoveryForAssistantError,
+  planRecoveryForSilentContextOverflow,
   recoveryBlocksContinuation,
   resetRecoveryMachine,
 } from "./recovery-machine.ts";
@@ -413,6 +414,19 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     pi.on("session_compact", (_event, ctx) => {
       restore(pi, ctx);
       flushRuntimePersistence(pi);
+      if (currentGoal?.status === "active") {
+        const action = planRecoveryForSilentContextOverflow(recoveryState);
+        if (action.type === "pause") {
+          const plan = planGoalTransition(currentGoal, {
+            kind: "recovery_pause",
+            reason: action.reason,
+            now: clock(),
+          });
+          applyTransitionPlan(pi, plan, ctx, { force: true });
+          ctx.ui.notify(`Goal paused for recovery: ${action.reason}`, "warning");
+          return;
+        }
+      }
       if (!recoveryBlocksContinuation(recoveryState)) ensurePendingContinuation(pi, ctx);
     });
     pi.on("before_agent_start", (event) => {

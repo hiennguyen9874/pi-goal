@@ -81,7 +81,7 @@ export function createRecoveryPausedAttention(reason: string): RecoveryAttention
 export function formatRecoveryAttention(attention: RecoveryAttention | null | undefined): string | undefined {
   if (!attention) return undefined;
   if (attention.kind === "pending") {
-    return `Goal recovery pending: ${attention.reason}. Waiting for the provider/host to recover.`;
+    return `Goal recovery pending: ${attention.reason}. Waiting for the provider/host to recover. No action is needed yet; send a message to reset recovery if you want to intervene.`;
   }
   return `Goal needs attention: ${attention.reason}. Use /goal resume after resolving the issue.`;
 }

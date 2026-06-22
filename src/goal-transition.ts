@@ -86,6 +86,7 @@ export function planGoalTransition(current: GoalState | null, request: GoalTrans
       const nextGoal = transitionGoal(goal, "paused", request.now);
       add({ type: "clearContinuation" });
       add({ type: "clearActiveAccounting" });
+      add({ type: "resetRecovery" });
       add({ type: "clearBudgetWarning" });
       add({ type: "syncTools" });
       add({ type: "refreshUi" });

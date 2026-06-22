@@ -48,7 +48,7 @@ test("create_or_replace new goal persists set and clears old runtime state", () 
   ]);
 });
 
-test("pause active goal persists set and clears continuation/accounting", () => {
+test("pause active goal persists set and clears continuation/accounting/recovery", () => {
   const current = activeGoal({ continuationScheduled: true });
   const plan = planGoalTransition(current, { kind: "pause", now: 200 });
 
@@ -58,6 +58,7 @@ test("pause active goal persists set and clears continuation/accounting", () => 
   assert.deepEqual(effectTypes(plan.effects), [
     "clearContinuation",
     "clearActiveAccounting",
+    "resetRecovery",
     "clearBudgetWarning",
     "syncTools",
     "refreshUi",

@@ -63,3 +63,11 @@
 2. Add runtime tests proving repeated silent context overflow pauses the active goal and cancels unsafe continuation work.
 3. Add `resetRecovery` to the explicit `pause` transition effects, or otherwise clear recovery state when users explicitly pause a goal, with a regression test.
 4. Clarify pending recovery status copy or tests so the required next action is explicit.
+
+## Fix Status
+- **Fixed (important):** Silent `session_compact` context-overflow recovery is now wired through `planRecoveryForSilentContextOverflow()` for active goals. First compaction remains a no-op recovery attempt; repeated compaction pauses through `recovery_pause`, clears unsafe continuation work, persists the paused goal, and notifies the user.
+- **Fixed (important):** Runtime coverage now proves repeated `session_compact` pauses the active goal and invalidates already scheduled continuation delivery.
+- **Fixed (important):** Explicit `pause` transition effects now include `resetRecovery`, with transition regression coverage.
+- **Fixed (minor):** Pending recovery status copy now gives a concrete next action: wait/no action is needed yet, or send a message to reset recovery if intervening.
+- **Deferred:** None.
+- **Rejected:** None.

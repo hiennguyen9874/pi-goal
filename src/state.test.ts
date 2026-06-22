@@ -321,11 +321,11 @@ test("formats footer status for each visible state", () => {
 test("footer status surfaces recovery attention before normal goal status", () => {
   assert.match(
     formatFooterStatus(activeGoal(), createRecoveryPendingAttention("provider error (websocket closed)")) ?? "",
-    /Goal recovery pending/,
+    /Goal recovery pending.*No action is needed yet/i,
   );
   assert.match(
     formatFooterStatus(activeGoal({ status: "paused" }), createRecoveryPausedAttention("non-retryable provider error")) ?? "",
-    /Goal needs attention/,
+    /Goal needs attention.*Use \/goal resume/i,
   );
 });
 
