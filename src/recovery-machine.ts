@@ -54,8 +54,10 @@ function planContextOverflowRecovery(state: GoalRecoveryMachineState): RecoveryA
   countersForFailureSignature(state.counters, CONTEXT_OVERFLOW_SIGNATURE);
   state.counters.compactionAttempts += 1;
   if (state.counters.compactionAttempts <= MAX_CONTEXT_COMPACTION_RETRIES) {
-    state.attention = null;
-    return { type: "noop" };
+    const reason = "context overflow recovered after host compaction; user-start turn required";
+    state.attention = createRecoveryPendingAttention(reason);
+    state.needsUserStartTurn = true;
+    return { type: "pending", reason };
   }
 
   const reason = "context window recovery failed after compaction retry";
@@ -97,6 +99,13 @@ export function planRecoveryForAssistantError(
 
 export function planRecoveryForSilentContextOverflow(state: GoalRecoveryMachineState): RecoveryAction {
   return planContextOverflowRecovery(state);
+}
+
+export function completeRecoveryUserStart(state: GoalRecoveryMachineState): boolean {
+  if (!state.needsUserStartTurn) return false;
+  state.attention = null;
+  state.needsUserStartTurn = false;
+  return true;
 }
 
 export function recoveryBlocksContinuation(state: GoalRecoveryMachineState): boolean {

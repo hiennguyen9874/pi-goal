@@ -36,7 +36,7 @@ test("classifies retryable and non-retryable provider errors", () => {
   assert.equal(isRetryableTransientError("Monthly usage limit reached"), false);
 });
 
-test("first context overflow is noop and repeated overflow pauses", () => {
+test("first context overflow requires user-start and repeated overflow pauses", () => {
   const state = createGoalRecoveryMachine();
 
   const first = planRecoveryForAssistantError(state, {
@@ -44,8 +44,9 @@ test("first context overflow is noop and repeated overflow pauses", () => {
     stopReason: "error",
     errorMessage: "context_length_exceeded",
   });
-  assert.equal(first.type, "noop");
+  assert.equal(first.type, "pending");
   assert.equal(state.counters.compactionAttempts, 1);
+  assert.equal(state.needsUserStartTurn, true);
 
   const second = planRecoveryForAssistantError(state, {
     role: "assistant",
@@ -83,7 +84,8 @@ test("non-retryable provider error pauses immediately", () => {
 
 test("silent context overflow uses same compaction counter", () => {
   const state = createGoalRecoveryMachine();
-  assert.equal(planRecoveryForSilentContextOverflow(state).type, "noop");
+  assert.equal(planRecoveryForSilentContextOverflow(state).type, "pending");
+  assert.equal(state.needsUserStartTurn, true);
   assert.equal(planRecoveryForSilentContextOverflow(state).type, "pause");
 });
 

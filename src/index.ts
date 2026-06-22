@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { registerGoalCommand } from "./commands.ts";
 import { formatDuration, formatFooterStatus, formatTokenValue } from "./format.ts";
 import { buildGoalUsageDelta, type UsageCarrier } from "./goal-accounting.ts";
-import { budgetLimitPrompt, continuationGoalIdFromMessage, continuationPrompt, initPrompt } from "./prompts.ts";
+import { budgetLimitPrompt, compactContinuationPrompt, continuationGoalIdFromMessage, continuationPrompt, initPrompt } from "./prompts.ts";
 import {
   CONTINUATION_MESSAGE_TYPE,
   ENTRY_TYPE,
@@ -22,6 +22,7 @@ import { applyQueuedGoalProviderContextRewrites } from "./queued-goal-work.ts";
 import { createStaleQueuedWorkGuard, type StaleQueuedWorkEffect } from "./stale-queued-work-guard.ts";
 import { isErrorAssistantMessage } from "./recovery.ts";
 import {
+  completeRecoveryUserStart,
   onRecoverySuccessfulTurn,
   onRecoveryUserInput,
   planRecoveryForAssistantError,
@@ -309,6 +310,15 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     }, undefined);
   }
 
+  function queueRecoveryUserStartTurn(pi: Pick<ExtensionAPI, "sendUserMessage">, ctx: ExtensionContext): boolean {
+    if (!currentGoal || currentGoal.status !== "active") return false;
+    if (!completeRecoveryUserStart(runtimeState.recovery)) return false;
+    invalidateContinuation();
+    refreshStatus(ctx);
+    pi.sendUserMessage(compactContinuationPrompt(currentGoal), { deliverAs: "followUp" });
+    return true;
+  }
+
   function register(pi: ExtensionAPI): void {
     appendEntryHost = pi;
     (pi as unknown as { registerMessageRenderer?: Function }).registerMessageRenderer?.(
@@ -369,6 +379,9 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
         refreshStatus(ctx as ExtensionContext);
         return statusBarEnabled;
       },
+      resumeRecoveryUserStart(ctx) {
+        return queueRecoveryUserStartTurn(pi, ctx as ExtensionContext);
+      },
     });
 
     pi.on("session_start", (event, ctx) => {
@@ -385,6 +398,11 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       flushRuntimePersistence(pi);
       if (currentGoal?.status === "active") {
         const action = planRecoveryForSilentContextOverflow(runtimeState.recovery);
+        if (action.type === "pending") {
+          refreshStatus(ctx);
+          ctx.ui.notify("Goal recovery needs a user-start turn after context compaction. Use /goal resume to continue.", "warning");
+          return;
+        }
         if (action.type === "pause") {
           const plan = planGoalTransition(currentGoal, {
             kind: "recovery_pause",

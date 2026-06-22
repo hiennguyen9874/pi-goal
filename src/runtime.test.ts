@@ -597,7 +597,7 @@ test("agent_end schedules continuation retry when agent is not settled yet", asy
   assert.equal(pi.messages.filter((m) => m.message?.customType === "pi-goal-continuation").length, 1);
 });
 
-test("session_compact retries continuation delivery from restored active goal state", async () => {
+test("session_compact requires /goal resume user-start before continuing active goal", async () => {
   const scheduled: Function[] = [];
   const pi = fakePi();
   createGoalExtension({ scheduler: (fn) => scheduled.push(fn) }).register(pi as never);
@@ -606,10 +606,17 @@ test("session_compact retries continuation delivery from restored active goal st
 
   await pi.handlers.session_start[0]({}, ctx);
   await pi.handlers.session_compact[0]({}, ctx);
-  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled.length, 0);
+  assert.match(ctx.statuses["pi-goal"] ?? "", /recovery pending/i);
+  assert.match(ctx.notifications.at(-1) ?? "", /\/goal resume/);
 
-  scheduled[0]();
-  assert.equal(pi.messages.filter((m) => m.message?.customType === "pi-goal-continuation").length, 1);
+  await pi.commands.goal.handler("resume", ctx);
+
+  assert.equal(scheduled.length, 0);
+  assert.equal(pi.messages.at(-1)?.message.role, "user");
+  assert.match(pi.messages.at(-1)?.message.content, /<pi_goal_continuation goal_id="goal-1">/);
+  assert.deepEqual(pi.messages.at(-1)?.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.doesNotMatch(ctx.statuses["pi-goal"] ?? "", /recovery pending/i);
 });
 
 test("repeated session_compact pauses active goal recovery and blocks continuation", async () => {
@@ -626,8 +633,7 @@ test("repeated session_compact pauses active goal recovery and blocks continuati
   const latest = pi.entries.at(-1)?.data as any;
   assert.equal(latest.goal.status, "paused");
   assert.match(ctx.statuses["pi-goal"] ?? "", /needs attention/i);
-  assert.equal(scheduled.length, 1);
-  scheduled[0]();
+  assert.equal(scheduled.length, 0);
   assert.equal(pi.messages.filter((m) => m.message?.customType === "pi-goal-continuation").length, 0);
 });
 

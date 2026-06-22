@@ -52,7 +52,7 @@ pi-goal uses hidden continuation messages to carry work across turns without rep
 
 **Budget-limit steering** transitions the goal to `budget_limited` when `tokensUsed` crosses `tokenBudget` and directs the model to wrap up instead of starting new work.
 
-**Recovery attention** detects provider failures and context-overflow recovery. Pending recovery blocks unsafe automatic continuation until the host recovers or the user sends another message. Repeated context overflow or non-retryable provider errors pause the goal and tell the user to resume when ready.
+**Recovery attention** detects provider failures and context-overflow recovery. Pending recovery blocks unsafe automatic continuation until the host recovers, the user sends another message, or `/goal resume` queues the required user-start follow-up after context compaction. Repeated context overflow or non-retryable provider errors pause the goal and tell the user to resume when ready.
 
 **Runtime usage persistence** writes compact replay-safe usage entries for token/time/turn counters when static goal metadata is unchanged, falling back to full snapshots when needed.
 

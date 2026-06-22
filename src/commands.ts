@@ -25,6 +25,7 @@ export interface GoalCommandHost {
   setGoal(goal: GoalState, source: "command", ctx: GoalCommandContext): void;
   clearGoal(source: "command", ctx: GoalCommandContext): void;
   setStatusBar(value: "on" | "off" | "toggle", source: "command", ctx: GoalCommandContext): boolean;
+  resumeRecoveryUserStart?(ctx: GoalCommandContext): boolean;
 }
 
 export function parseGoalCommand(args: string): GoalCommand {
@@ -94,6 +95,10 @@ export async function handleGoalCommand(
     if (parsed.action === "pause" || parsed.action === "resume") {
       if (!current) {
         ctx.ui.notify("No goal is set.", "warning");
+        return;
+      }
+      if (parsed.action === "resume" && current.status === "active" && host.resumeRecoveryUserStart?.(ctx)) {
+        ctx.ui.notify("Goal recovery resumed. A follow-up turn was queued to continue after host context recovery.", "info");
         return;
       }
       const check = parsed.action === "pause" ? canPauseGoal(current) : canResumeGoal(current);
