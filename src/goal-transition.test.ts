@@ -111,6 +111,21 @@ test("budget_limited accounting requires usage at or over budget", () => {
   );
 });
 
+test("budget_limited accounting clears continuation and active accounting", () => {
+  const current = activeGoal({ tokenBudget: 100, tokensUsed: 90 });
+  const next = { ...current, status: "budget_limited" as const, tokensUsed: 100, updatedAt: 200 };
+
+  const plan = planGoalTransition(current, { kind: "runtime_accounting", nextGoal: next });
+
+  assert.equal(plan.persist, "usage");
+  assert.deepEqual(effectTypes(plan.effects), [
+    "clearContinuation",
+    "clearActiveAccounting",
+    "syncTools",
+    "refreshUi",
+  ]);
+});
+
 test("complete active goal persists set and clears terminal runtime state", () => {
   const current = activeGoal({ continuationScheduled: true });
   const plan = planGoalTransition(current, { kind: "complete", now: 200 });

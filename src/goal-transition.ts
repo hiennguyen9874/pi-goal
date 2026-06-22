@@ -131,6 +131,10 @@ export function planGoalTransition(current: GoalState | null, request: GoalTrans
 
     case "runtime_accounting":
       validateRuntimeAccounting(current, request.nextGoal);
+      if (request.nextGoal.status === "budget_limited") {
+        add({ type: "clearContinuation" });
+        add({ type: "clearActiveAccounting" });
+      }
       add({ type: "syncTools" });
       add({ type: "refreshUi" });
       return { nextGoal: request.nextGoal, persist: "usage", effects };
