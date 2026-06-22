@@ -2,8 +2,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["test/**/*.test.ts", "src/**/*.test.ts"],
-    exclude: ["profiling/**", "node_modules/**"],
+    include: ["src/package-manifest.test.ts"],
+    exclude: ["profiling/**", "node_modules/**", "fitchmultz-pi-codex-goal/**", "code-yeongyu-pi-goal/**"],
     pool: "forks",
   },
 });

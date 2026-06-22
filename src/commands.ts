@@ -100,14 +100,15 @@ export async function handleGoalCommand(
         ctx.ui.notify("Clear or complete the existing goal before creating another.", "warning");
         return;
       }
-      const ok = await ctx.ui.confirm("Replace goal?", `Current goal:\n${current.objective}\n\nNew goal:\n${parsed.objective}`);
+      const ok = await ctx.ui.confirm("Replace goal?", `Current goal:\n${current.objective}\n\nNew goal:\n${(parsed as Extract<GoalCommand, { action: 'create' }>).objective}`);
       if (!ok) {
         ctx.ui.notify("Goal unchanged.", "info");
         return;
       }
     }
 
-    const next = createGoal(parsed.objective, parsed.tokenBudget, createOptions);
+    const createParsed = parsed as Extract<GoalCommand, { action: 'create' }>;
+    const next = createGoal(createParsed.objective, createParsed.tokenBudget, createOptions);
     host.setGoal(next, "command", ctx);
     ctx.ui.notify(`Goal created: ${next.objective}`, "info");
   } catch (error) {

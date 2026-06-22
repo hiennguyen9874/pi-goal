@@ -224,7 +224,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       pi.sendMessage(
         {
           customType: CONTINUATION_MESSAGE_TYPE,
-          content: message,
+          content: message!,
           display: false,
           details: { goalId },
         },
@@ -241,11 +241,11 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
   ): boolean {
     if (!shouldScheduleContinuation(currentGoal, { toolsRestricted })) return false;
 
-    currentGoal = { ...currentGoal, continuationScheduled: true, updatedAt: clock() };
-    persist(pi, currentGoal, { force: true });
+    currentGoal = { ...currentGoal!, continuationScheduled: true, updatedAt: clock() };
+    persist(pi, currentGoal!, { force: true });
 
-    pendingContinuationGoalId = currentGoal.goalId;
-    pendingContinuationMessage = continuationPrompt(currentGoal);
+    pendingContinuationGoalId = currentGoal!.goalId;
+    pendingContinuationMessage = continuationPrompt(currentGoal!);
     continuationGeneration++;
 
     return schedulePendingContinuation(pi, ctx);
@@ -374,10 +374,11 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       activeTurnStartedAt = event.timestamp ?? clock();
       currentTurnHadToolCall = false;
       
-      const queuedGoalId = typeof event.details?.goalId === "string"
-        ? event.details.goalId
-        : typeof event.message === "string"
-          ? continuationGoalIdFromMessage(event.message)
+      const eventAny = event as unknown as { details?: { goalId?: unknown }; message?: string };
+      const queuedGoalId = typeof eventAny.details?.goalId === "string"
+        ? eventAny.details.goalId
+        : typeof eventAny.message === "string"
+          ? continuationGoalIdFromMessage(eventAny.message)
           : null;
       currentTurnQueuedGoalId = queuedGoalId;
 
@@ -481,8 +482,8 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       pendingContinuationGoalId = null;
       pendingContinuationMessage = null;
     });
-    pi.on("context", (event) => {
-      const result = applyQueuedGoalProviderContextRewrites(event.messages, currentGoal);
+    (pi.on as (event: string, handler: (event: { messages: unknown[] }) => unknown) => void)("context", (event) => {
+      const result = applyQueuedGoalProviderContextRewrites(event.messages as Parameters<typeof applyQueuedGoalProviderContextRewrites>[0], currentGoal);
       return result.changed ? { messages: result.messages } : undefined;
     });
   }

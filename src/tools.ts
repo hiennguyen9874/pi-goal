@@ -58,7 +58,7 @@ export function registerGoalTools(pi: Pick<ExtensionAPI, "registerTool">, host: 
       if (current && current.status !== "complete" && current.status !== "cleared") {
         return textResult("Error: cannot create a new goal because this session already has a non-terminal goal.", { goal: current, error: "duplicate_goal" });
       }
-      const goal = createGoal(params.objective, params.token_budget ?? null);
+      const goal = createGoal((params as { objective: string }).objective, (params as { token_budget?: number }).token_budget ?? null);
       host.setGoal(goal, "tool", ctx);
       return textResult(goalToolText(goal), { goal });
     },

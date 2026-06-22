@@ -182,7 +182,7 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalState 
   let current: GoalState | null = null;
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== ENTRY_TYPE || !isGoalEntry(entry.data)) continue;
-    current = entry.data.action === "clear" ? null : cloneGoal(entry.data.goal);
+    current = entry.data.action === "clear" ? null : cloneGoal(entry.data.goal!);
   }
   return current;
 }
