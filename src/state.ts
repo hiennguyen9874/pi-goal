@@ -23,14 +23,42 @@ export interface GoalState {
   updatedAt: number;
 }
 
-export interface GoalEntry {
+export interface GoalSetEntry {
   version: 1;
-  action: "set" | "clear";
-  goal: GoalState | null;
+  action: "set";
+  goal: GoalState;
+  statusBarEnabled?: boolean;
+  at: number;
+}
+
+export interface GoalClearEntry {
+  version: 1;
+  action: "clear";
+  goal: null;
   clearedGoalId?: string | null;
   statusBarEnabled?: boolean;
   at: number;
 }
+
+export interface GoalUsageEntry {
+  version: 1;
+  action: "usage";
+  goalId: string;
+  status: Extract<GoalStatus, "active" | "budget_limited">;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  turnCount: number;
+  continuationCount: number;
+  updatedAt: number;
+  statusBarEnabled?: boolean;
+  at: number;
+}
+
+export type GoalEntry = GoalSetEntry | GoalClearEntry | GoalUsageEntry;
+
+export type RuntimeUsageSnapshot = Pick<GoalUsageEntry,
+  "goalId" | "status" | "tokensUsed" | "timeUsedSeconds" | "turnCount" | "continuationCount" | "updatedAt"
+>;
 
 export interface SessionEntryLike {
   type?: string;
@@ -156,12 +184,20 @@ export function applyGoalUsage(goal: GoalState, delta: UsageDelta): { goal: Goal
   };
 }
 
-export function goalEntry(goal: GoalState, at = nowMs(), statusBarEnabled?: boolean): GoalEntry {
+export function goalEntry(goal: GoalState, at = nowMs(), statusBarEnabled?: boolean): GoalSetEntry {
   return { version: 1, action: "set", goal: cloneGoal(goal), statusBarEnabled, at };
 }
 
-export function clearGoalEntry(clearedGoalId: string | null, at = nowMs(), statusBarEnabled?: boolean): GoalEntry {
+export function clearGoalEntry(clearedGoalId: string | null, at = nowMs(), statusBarEnabled?: boolean): GoalClearEntry {
   return { version: 1, action: "clear", goal: null, clearedGoalId, statusBarEnabled, at };
+}
+
+export function runtimeUsageEntry(
+  usage: RuntimeUsageSnapshot,
+  at = nowMs(),
+  statusBarEnabled?: boolean,
+): GoalUsageEntry {
+  return { version: 1, action: "usage", ...usage, statusBarEnabled, at };
 }
 
 export function isGoalState(value: unknown): value is GoalState {
@@ -175,14 +211,57 @@ export function isGoalEntry(value: unknown): value is GoalEntry {
   const entry = value as Partial<GoalEntry>;
   if (entry.version !== 1 || typeof entry.at !== "number") return false;
   if (entry.action === "clear") return true;
-  return entry.action === "set" && isGoalState(entry.goal);
+  if (entry.action === "set") return isGoalState(entry.goal);
+  if (entry.action !== "usage") return false;
+  return typeof entry.goalId === "string"
+    && (entry.status === "active" || entry.status === "budget_limited")
+    && typeof entry.tokensUsed === "number"
+    && typeof entry.timeUsedSeconds === "number"
+    && typeof entry.turnCount === "number"
+    && typeof entry.continuationCount === "number"
+    && typeof entry.updatedAt === "number";
+}
+
+function canApplyRuntimeUsageEntry(goal: GoalState, entry: GoalUsageEntry): boolean {
+  if (goal.goalId !== entry.goalId) return false;
+  if (goal.status !== "active" && goal.status !== "budget_limited") return false;
+  if (entry.status !== "active" && entry.status !== "budget_limited") return false;
+  if (entry.tokensUsed < goal.tokensUsed) return false;
+  if (entry.timeUsedSeconds < goal.timeUsedSeconds) return false;
+  if (entry.turnCount < goal.turnCount) return false;
+  if (entry.continuationCount < goal.continuationCount) return false;
+  if (entry.updatedAt < goal.updatedAt) return false;
+  if (entry.status === "budget_limited") {
+    if (goal.tokenBudget === null) return false;
+    if (entry.tokensUsed < goal.tokenBudget) return false;
+  }
+  return true;
 }
 
 export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalState | null {
   let current: GoalState | null = null;
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== ENTRY_TYPE || !isGoalEntry(entry.data)) continue;
-    current = entry.data.action === "clear" ? null : cloneGoal(entry.data.goal!);
+    const data = entry.data;
+    if (data.action === "clear") {
+      current = null;
+      continue;
+    }
+    if (data.action === "usage") {
+      const goal: GoalState | null = current;
+      if (goal && canApplyRuntimeUsageEntry(goal, data)) {
+        current = Object.assign(cloneGoal(goal), {
+          status: data.status,
+          tokensUsed: data.tokensUsed,
+          timeUsedSeconds: data.timeUsedSeconds,
+          turnCount: data.turnCount,
+          continuationCount: data.continuationCount,
+          updatedAt: data.updatedAt,
+        });
+      }
+      continue;
+    }
+    current = cloneGoal(data.goal);
   }
   return current;
 }

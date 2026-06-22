@@ -14,6 +14,7 @@ import {
   isTerminalGoalStatus,
   parseTokenBudget,
   reconstructGoal,
+  runtimeUsageEntry,
   transitionGoal,
   validateObjective,
   type GoalState,
@@ -136,6 +137,129 @@ test("clear entries reconstruct as no goal", () => {
   ]);
 
   assert.equal(reconstructed, null);
+});
+
+test("runtime usage entries update matching active goals during reconstruction", () => {
+  const goal = activeGoal({ goalId: "g", tokenBudget: 100, updatedAt: 1000 });
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: ENTRY_TYPE, data: goalEntry(goal, 1000) },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "active",
+        tokensUsed: 30,
+        timeUsedSeconds: 12,
+        turnCount: 2,
+        continuationCount: 1,
+        updatedAt: 2000,
+      }, 2000),
+    },
+  ]);
+
+  assert.equal(reconstructed?.goalId, "g");
+  assert.equal(reconstructed?.tokensUsed, 30);
+  assert.equal(reconstructed?.timeUsedSeconds, 12);
+  assert.equal(reconstructed?.turnCount, 2);
+  assert.equal(reconstructed?.continuationCount, 1);
+  assert.equal(reconstructed?.updatedAt, 2000);
+});
+
+test("runtime usage entries ignore mismatched goal ids", () => {
+  const goal = activeGoal({ goalId: "g", tokensUsed: 10, updatedAt: 1000 });
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: ENTRY_TYPE, data: goalEntry(goal, 1000) },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "other",
+        status: "active",
+        tokensUsed: 50,
+        timeUsedSeconds: 50,
+        turnCount: 5,
+        continuationCount: 5,
+        updatedAt: 2000,
+      }, 2000),
+    },
+  ]);
+
+  assert.equal(reconstructed?.tokensUsed, 10);
+  assert.equal(reconstructed?.updatedAt, 1000);
+});
+
+test("runtime usage entries ignore decreasing usage or updatedAt rewind", () => {
+  const goal = activeGoal({ goalId: "g", tokensUsed: 20, timeUsedSeconds: 10, turnCount: 3, updatedAt: 1000 });
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: ENTRY_TYPE, data: goalEntry(goal, 1000) },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "active",
+        tokensUsed: 19,
+        timeUsedSeconds: 11,
+        turnCount: 4,
+        continuationCount: 0,
+        updatedAt: 2000,
+      }, 2000),
+    },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "active",
+        tokensUsed: 21,
+        timeUsedSeconds: 11,
+        turnCount: 4,
+        continuationCount: 0,
+        updatedAt: 999,
+      }, 2001),
+    },
+  ]);
+
+  assert.equal(reconstructed?.tokensUsed, 20);
+  assert.equal(reconstructed?.updatedAt, 1000);
+});
+
+test("budget_limited runtime usage requires usage at or over budget", () => {
+  const goal = activeGoal({ goalId: "g", tokenBudget: 100, tokensUsed: 80, updatedAt: 1000 });
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: ENTRY_TYPE, data: goalEntry(goal, 1000) },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "budget_limited",
+        tokensUsed: 99,
+        timeUsedSeconds: 20,
+        turnCount: 2,
+        continuationCount: 1,
+        updatedAt: 2000,
+      }, 2000),
+    },
+    {
+      type: "custom",
+      customType: ENTRY_TYPE,
+      data: runtimeUsageEntry({
+        goalId: "g",
+        status: "budget_limited",
+        tokensUsed: 120,
+        timeUsedSeconds: 30,
+        turnCount: 3,
+        continuationCount: 1,
+        updatedAt: 3000,
+      }, 3000),
+    },
+  ]);
+
+  assert.equal(reconstructed?.status, "budget_limited");
+  assert.equal(reconstructed?.tokensUsed, 120);
+  assert.equal(reconstructed?.updatedAt, 3000);
 });
 
 test("formats duration and token values compactly", () => {

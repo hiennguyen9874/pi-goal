@@ -161,10 +161,50 @@ test("turn_end accounts elapsed seconds and usage tokens", async () => {
   time = 4000;
   await pi.handlers.turn_end[0]({ message: { role: "assistant", usage: { input: 10, output: 15 } } }, ctx);
 
-  const latestGoal = (pi.entries.at(-1)?.data as any).goal;
+  const latest = pi.entries.at(-1)?.data as any;
+  const latestGoal = latest.action === "usage" ? latest : latest.goal;
   assert.equal(latestGoal.tokensUsed, 25);
   assert.equal(latestGoal.timeUsedSeconds, 3);
   assert.equal(latestGoal.turnCount, 1);
+});
+
+test("turn_end persists runtime accounting as usage entry after initial set", async () => {
+  const pi = fakePi();
+  let time = 1000;
+  createGoalExtension({ clock: () => time }).register(pi as never);
+  const goal = activeGoal({ tokenBudget: 1000 });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.turn_start[0]({ timestamp: 1000 }, ctx);
+  time = 4000;
+  await pi.handlers.turn_end[0]({ message: { role: "assistant", usage: { input: 10, output: 15 } } }, ctx);
+
+  const latest = pi.entries.at(-1)?.data as any;
+  assert.equal(latest.action, "usage");
+  assert.equal(latest.goalId, "goal-1");
+  assert.equal(latest.tokensUsed, 25);
+  assert.equal(latest.timeUsedSeconds, 3);
+  assert.equal(latest.turnCount, 1);
+});
+
+test("completion still persists full complete set after final turn accounting", async () => {
+  const pi = fakePi();
+  let time = 1000;
+  createGoalExtension({ clock: () => time }).register(pi as never);
+  const goal = activeGoal({ goalId: "g", tokenBudget: 1000 });
+  const ctx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, ctx);
+  await pi.handlers.turn_start[0]({}, ctx);
+  await pi.tools.update_goal.execute("tool-1", { status: "complete" }, undefined, undefined, ctx);
+  time = 2000;
+  await pi.handlers.turn_end[0]({ message: { role: "assistant", usage: { totalTokens: 20 } } }, ctx);
+
+  const latest = pi.entries.at(-1)?.data as any;
+  assert.equal(latest.action, "set");
+  assert.equal(latest.goal.status, "complete");
+  assert.equal(latest.goal.tokensUsed, 20);
 });
 
 test("budget exhaustion marks goal budget_limited and sends wrap-up prompt once", async () => {
@@ -179,7 +219,8 @@ test("budget exhaustion marks goal budget_limited and sends wrap-up prompt once"
   time = 2000;
   await pi.handlers.turn_end[0]({ message: { role: "assistant", usage: { totalTokens: 30 } } }, ctx);
 
-  const latestGoal = (pi.entries.at(-1)?.data as any).goal;
+  const latest = pi.entries.at(-1)?.data as any;
+  const latestGoal = latest.action === "usage" ? latest : latest.goal;
   assert.equal(latestGoal.status, "budget_limited");
   assert.equal(pi.messages.at(-1)?.message.customType, "pi-goal-continuation");
   assert.match(pi.messages.at(-1)?.message.content ?? "", /reached its token budget/);
@@ -705,10 +746,13 @@ test("create_goal replace_existing clears in-flight turn accounting", async () =
   );
   await pi.handlers.turn_end[0]({ message: { role: "assistant", usage: { totalTokens: 50 } } }, ctx);
 
-  const latestGoal = (pi.entries.at(-1)?.data as any).goal;
-  assert.equal(latestGoal.objective, "Replacement");
+  const replacementSet = pi.entries
+    .map((entry) => entry.data as any)
+    .find((entry) => entry.action === "set" && entry.goal?.objective === "Replacement");
+  const latest = pi.entries.at(-1)?.data as any;
+  const latestGoal = latest.action === "usage" ? latest : latest.goal;
+  assert.equal(replacementSet?.goal.objective, "Replacement");
   assert.equal(latestGoal.tokensUsed, 50);
   assert.equal(latestGoal.timeUsedSeconds, 0);
   assert.equal(latestGoal.turnCount, 1);
-  assert.equal(latestGoal.lastContinuationHadToolCall, false);
 });

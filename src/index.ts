@@ -6,16 +6,13 @@ import { budgetLimitPrompt, continuationGoalIdFromMessage, continuationPrompt, i
 import {
   CONTINUATION_MESSAGE_TYPE,
   ENTRY_TYPE,
-  clearGoalEntry,
-  cloneGoal,
-  goalEntry,
-  goalsEquivalent,
   reconstructGoal,
   applyGoalUsage,
   completeGoalIdempotently,
   type GoalEntry,
   type GoalState,
 } from "./state.ts";
+import { createGoalPersistence } from "./goal-persistence.ts";
 import { registerGoalTools } from "./tools.ts";
 import { planGoalTransition, type GoalTransitionEffect, type GoalTransitionPlan } from "./goal-transition.ts";
 import { applyGoalTransitionEffects } from "./goal-transition-effects.ts";
@@ -79,10 +76,17 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
   const clock = options.clock ?? (() => Date.now());
   const scheduler = options.scheduler ?? ((fn: () => void) => setTimeout(fn, 0));
   let currentGoal: GoalState | null = null;
-  let lastPersistedGoal: GoalState | null = null;
-  let lastRuntimePersistAt: number | null = null;
   const runtimePersistIntervalMs = 60_000;
   let statusBarEnabled = true;
+  let appendEntryHost: Pick<ExtensionAPI, "appendEntry"> | null = null;
+  const persistence = createGoalPersistence({
+    appendEntry(customType, data) {
+      if (!appendEntryHost) throw new Error("Goal persistence is not registered.");
+      appendEntryHost.appendEntry(customType, data);
+    },
+    clock,
+    statusBarEnabled: () => statusBarEnabled,
+  });
   let awaitingContinuationGoalId: string | null = null;
   let continuationGeneration = 0;
   let pendingContinuationGoalId: string | null = null;
@@ -127,33 +131,31 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     pi.setActiveTools(Array.from(active));
   }
 
-  function persist(pi: Pick<ExtensionAPI, "appendEntry">, goal: GoalState, options?: { force?: boolean }): void {
+  function persist(
+    _pi: Pick<ExtensionAPI, "appendEntry">,
+    goal: GoalState,
+    options?: { force?: boolean; source?: "set" | "runtime" },
+  ): void {
     currentGoal = goal;
-    if (!options?.force && goalsEquivalent(goal, lastPersistedGoal)) {
-      return;
-    }
-    pi.appendEntry(ENTRY_TYPE, goalEntry(goal, clock(), statusBarEnabled));
-    lastPersistedGoal = cloneGoal(goal);
-    lastRuntimePersistAt = clock();
+    persistence.setCurrentGoal(goal);
+    persistence.persistCurrent(options?.source ?? "set", { force: options?.force });
   }
 
-  function clear(pi: Pick<ExtensionAPI, "appendEntry">): void {
+  function clear(_pi: Pick<ExtensionAPI, "appendEntry">): void {
     const clearedGoalId = currentGoal?.goalId ?? null;
     currentGoal = null;
-    lastPersistedGoal = null;
-    lastRuntimePersistAt = null;
+    persistence.appendClearEntry(clearedGoalId);
     pendingCompletionGoalId = null;
     staleQueuedWorkGuard.clear();
     currentTurnQueuedGoalId = null;
     currentTurnIsStaleQueuedWork = false;
-    pi.appendEntry(ENTRY_TYPE, clearGoalEntry(clearedGoalId, clock(), statusBarEnabled));
   }
 
   function restore(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">, ctx: ExtensionContext): void {
     const branch = ctx.sessionManager.getBranch();
     currentGoal = reconstructGoal(branch);
-    lastPersistedGoal = currentGoal ? cloneGoal(currentGoal) : null;
-    lastRuntimePersistAt = null;
+    persistence.setCurrentGoal(currentGoal);
+    persistence.syncPersistedSnapshot(currentGoal);
     for (const entry of branch) {
       if (entry?.type !== "custom" || entry.customType !== ENTRY_TYPE) continue;
       const data = entry.data as GoalEntry | undefined;
@@ -171,10 +173,11 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
 
   function flushRuntimePersistence(pi: Pick<ExtensionAPI, "appendEntry">): void {
     if (!currentGoal) return;
+    const lastRuntimePersistAt = persistence.getLastRuntimePersistAt();
     if (lastRuntimePersistAt !== null && clock() - lastRuntimePersistAt < runtimePersistIntervalMs) {
       return;
     }
-    persist(pi, currentGoal);
+    persist(pi, currentGoal, { source: "runtime" });
   }
 
   function invalidateContinuation(): void {
@@ -227,7 +230,10 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     applyTransitionEffects(pi, plan.effects, ctx, "beforePersist");
     if (plan.persist === "set" || plan.persist === "usage") {
       if (!plan.nextGoal) throw new Error("Transition plan requires a goal to persist.");
-      persist(pi, plan.nextGoal, { force: options?.force ?? plan.persist === "set" });
+      persist(pi, plan.nextGoal, {
+        force: options?.force ?? plan.persist === "set",
+        source: plan.persist === "usage" ? "runtime" : "set",
+      });
     } else if (plan.persist === "clear") {
       clear(pi);
     } else if (plan.nextGoal) {
@@ -322,6 +328,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
   }
 
   function register(pi: ExtensionAPI): void {
+    appendEntryHost = pi;
     (pi as unknown as { registerMessageRenderer?: Function }).registerMessageRenderer?.(
       GOAL_EVENT_MESSAGE_TYPE,
       (message: { details?: { kind?: string; objective?: string | null; status?: string | null } }) => textComponent(
