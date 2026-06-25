@@ -71,7 +71,10 @@ test("renders compact continuation prompt with required safety contract", () => 
   assert.match(prompt, /<untrusted_objective>\nImplement &lt;feature&gt; &amp; verify\n<\/untrusted_objective>/);
   assert.match(prompt, /Tokens used: 250/);
   assert.match(prompt, /Token budget: 1K/);
-  assert.match(prompt, /Only call update_goal when concrete evidence proves the full objective is complete/i);
+  assert.match(prompt, /Core invariants/i);
+  assert.match(prompt, /Keep the full objective intact/i);
+  assert.match(prompt, /Use current workspace and external evidence/i);
+  assert.match(prompt, /Only call update_goal when current evidence proves every requirement is complete/i);
   assert.equal(continuationGoalIdFromMessage(prompt), "goal-abc");
   assert.ok(prompt.length < continuationPrompt(goal).length);
 });

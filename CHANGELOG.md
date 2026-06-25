@@ -13,3 +13,8 @@
 - Added replay-safe runtime usage entries.
 - Added provider/context-overflow recovery attention.
 - Added package smoke validation.
+- Fixed `/goal resume` behavior for suppressed active goals and budget-limited goals.
+- Added a one-time warning when goal continuation is blocked because mutating tools are unavailable.
+- Strengthened compact continuation guardrails to preserve objective scope and require evidence before completion.
+- Cancelled queued continuations unless the matching current goal is still active.
+- Improved duplicate `create_goal` guidance for agents.

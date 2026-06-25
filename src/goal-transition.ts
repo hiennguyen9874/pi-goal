@@ -94,7 +94,9 @@ export function planGoalTransition(current: GoalState | null, request: GoalTrans
 
     case "resume": {
       const goal = requireCurrent(current, "resume");
-      if (goal.status !== "paused") throw new Error("Only paused goals can be resumed.");
+      if (goal.status !== "paused" && goal.status !== "budget_limited") {
+        throw new Error("Only paused or budget-limited goals can be resumed.");
+      }
       const nextGoal = transitionGoal(goal, "active", request.now);
       add({ type: "resetRecovery" });
       add({ type: "clearBudgetWarning" });

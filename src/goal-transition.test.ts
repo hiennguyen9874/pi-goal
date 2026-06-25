@@ -81,6 +81,20 @@ test("resume paused goal clears suppression without queuing transition effect", 
   ]);
 });
 
+test("resume budget-limited goal reactivates it", () => {
+  const current = activeGoal({ status: "budget_limited", tokenBudget: 100, tokensUsed: 100 });
+  const plan = planGoalTransition(current, { kind: "resume", now: 200 });
+
+  assert.equal(plan.persist, "set");
+  assert.equal(plan.nextGoal?.status, "active");
+  assert.deepEqual(effectTypes(plan.effects), [
+    "resetRecovery",
+    "clearBudgetWarning",
+    "syncTools",
+    "refreshUi",
+  ]);
+});
+
 test("runtime accounting rejects goal identity changes", () => {
   const current = activeGoal({ goalId: "current" });
   const next = activeGoal({ goalId: "other", tokensUsed: 1, updatedAt: 200 });

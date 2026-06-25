@@ -51,9 +51,9 @@ export function applyQueuedGoalProviderContextRewrites(
   let changed = false;
 
   for (const [goalId, indices] of byGoalId) {
-    const isCurrentGoal = currentGoal?.goalId === goalId;
+    const isRunnableCurrentGoal = currentGoal?.goalId === goalId && currentGoal.status === "active";
 
-    if (isCurrentGoal) {
+    if (isRunnableCurrentGoal) {
       // Keep only the latest message runnable, supersede older ones
       const latestIndex = indices[indices.length - 1];
       

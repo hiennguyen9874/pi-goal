@@ -287,8 +287,10 @@ export function canPauseGoal(goal: GoalState): GoalLifecycleCheck {
 
 export function canResumeGoal(goal: GoalState): GoalLifecycleCheck {
   if (goal.status === "complete") return { ok: false, message: "Completed goals are terminal and cannot be resumed." };
-  if (goal.status !== "paused") return { ok: false, message: "Only paused goals can be resumed." };
-  return { ok: true, message: "Goal resumed." };
+  if (goal.status === "paused") return { ok: true, message: "Goal resumed." };
+  if (goal.status === "budget_limited") return { ok: true, message: "Goal resumed beyond the original token budget." };
+  if (goal.status === "active" && goal.continuationSuppressed) return { ok: true, message: "Goal continuation resumed." };
+  return { ok: false, message: "Only paused, budget-limited, or suppressed active goals can be resumed." };
 }
 
 export function completeGoalIdempotently(goal: GoalState, now = nowMs()): { goal: GoalState; changed: boolean; message: string } {

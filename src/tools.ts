@@ -67,7 +67,10 @@ export function registerGoalTools(pi: Pick<ExtensionAPI, "registerTool">, host: 
       const current = host.getGoal();
       const shouldReplace = (params as { replace_existing?: boolean }).replace_existing === true;
       if (current && current.status !== "complete" && current.status !== "cleared" && !shouldReplace) {
-        return textResult("Error: cannot create a new goal because this session already has a non-terminal goal.", { goal: current, error: "duplicate_goal" });
+        return textResult(
+          "Error: duplicate_goal. A non-terminal goal already exists. Do not call create_goal again unless the user explicitly asks to replace it. Use get_goal to inspect it, ask the user, or continue the existing goal.",
+          { goal: current, error: "duplicate_goal", nextSuggestedAction: "continue_existing_or_ask_user" },
+        );
       }
       const goal = createGoal((params as { objective: string }).objective, (params as { token_budget?: number }).token_budget ?? null);
       host.setGoal(goal, "tool", ctx);

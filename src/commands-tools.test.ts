@@ -93,6 +93,16 @@ test("/goal pause, resume, and clear transition state", async () => {
   await handleGoalCommand(host, "resume", ctx as never);
   assert.equal(host.getGoal()?.status, "active");
 
+  host.setGoal({ ...host.getGoal()!, status: "budget_limited", tokenBudget: 10, tokensUsed: 10 });
+  await handleGoalCommand(host, "resume", ctx as never);
+  assert.equal(host.getGoal()?.status, "active");
+  assert.match(ctx.notifications.at(-1)?.message ?? "", /beyond the original token budget/i);
+
+  host.setGoal({ ...host.getGoal()!, continuationSuppressed: true, lastContinuationHadToolCall: false });
+  await handleGoalCommand(host, "resume", ctx as never);
+  assert.equal(host.getGoal()?.continuationSuppressed, false);
+  assert.match(ctx.notifications.at(-1)?.message ?? "", /continuation resumed/i);
+
   await handleGoalCommand(host, "clear", ctx as never);
   assert.equal(host.getGoal(), null);
 });
@@ -160,7 +170,10 @@ test("create_goal creates first goal and rejects duplicate active goal", async (
   assert.match(created.content[0].text, /"objective": "Build"/);
 
   const duplicate = await tools.create_goal.execute("tool-2", { objective: "Replace" }, undefined, undefined, {});
-  assert.match(duplicate.content[0].text, /cannot create/i);
+  assert.match(duplicate.content[0].text, /duplicate_goal/i);
+  assert.match(duplicate.content[0].text, /continue the existing goal/i);
+  assert.equal(duplicate.details.error, "duplicate_goal");
+  assert.equal(duplicate.details.nextSuggestedAction, "continue_existing_or_ask_user");
   assert.equal(getGoal()?.objective, "Build");
 });
 
@@ -208,7 +221,7 @@ test("create_goal replaces non-terminal goals only when replace_existing is true
   const { tools, getGoal } = captureTools(existing);
 
   const duplicate = await tools.create_goal.execute("tool-1", { objective: "New" }, undefined, undefined, {});
-  assert.match(duplicate.content[0].text, /cannot create/i);
+  assert.match(duplicate.content[0].text, /duplicate_goal/i);
   assert.equal(getGoal()?.goalId, "existing");
 
   const replaced = await tools.create_goal.execute(

@@ -98,6 +98,13 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
     ctx.ui.setStatus("pi-goal", statusBarEnabled ? formatFooterStatus(currentGoal, runtimeState.recovery.attention) : undefined);
   }
 
+  function notifyToolsRestrictedContinuationBlocked(ctx: Pick<ExtensionContext, "ui">): void {
+    if (!currentGoal || currentGoal.status !== "active" || currentGoal.continuationSuppressed || !runtimeState.toolsRestricted) return;
+    if (runtimeState.toolsRestrictedContinuationNotified) return;
+    runtimeState.toolsRestrictedContinuationNotified = true;
+    ctx.ui.notify("Goal continuation waiting: required mutating tools are unavailable.", "warning");
+  }
+
   function syncGoalTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
     const active = new Set(pi.getActiveTools());
     active.add("get_goal");
@@ -348,6 +355,10 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       setGoal(goal, _source, ctx) {
         const previousGoal = currentGoal;
         const previousStatus = previousGoal?.status ?? null;
+        const resumedSuppressedContinuation = previousGoal?.status === "active"
+          && previousGoal.continuationSuppressed
+          && goal.status === "active"
+          && !goal.continuationSuppressed;
         const isNewGoal = previousGoal?.goalId !== goal.goalId;
         const plan = isNewGoal
           ? planGoalTransition(previousGoal, { kind: "create_or_replace", nextGoal: goal, source: "command" })
@@ -360,11 +371,11 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
 
         if (isNewGoal) emitGoalEvent(pi, "created", goal);
         if (!isNewGoal && previousStatus === "active" && goal.status === "paused") emitGoalEvent(pi, "paused", goal);
-        if (!isNewGoal && previousStatus !== "active" && goal.status === "active") emitGoalEvent(pi, "resumed", goal);
+        if (!isNewGoal && (previousStatus !== "active" || resumedSuppressedContinuation) && goal.status === "active") emitGoalEvent(pi, "resumed", goal);
         if (isNewGoal && goal.status === "active" && ctx.isIdle() && !ctx.hasPendingMessages()) {
           pi.sendUserMessage(initPrompt(goal));
-        } else if (!isNewGoal && previousStatus !== "active" && goal.status === "active") {
-          scheduleContinuation(pi, ctx);
+        } else if (!isNewGoal && (previousStatus !== "active" || resumedSuppressedContinuation) && goal.status === "active") {
+          if (!scheduleContinuation(pi, ctx)) notifyToolsRestrictedContinuationBlocked(ctx as ExtensionContext);
         }
       },
       clearGoal(_source, ctx) {
@@ -414,12 +425,15 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
           return;
         }
       }
-      if (!recoveryBlocksContinuation(runtimeState.recovery)) ensurePendingContinuation(pi, ctx);
+      if (!recoveryBlocksContinuation(runtimeState.recovery) && !ensurePendingContinuation(pi, ctx)) {
+        notifyToolsRestrictedContinuationBlocked(ctx);
+      }
     });
     pi.on("before_agent_start", (event) => {
       const activeTools = new Set(pi.getActiveTools());
       const hasMutatingTool = activeTools.has("edit") || activeTools.has("write") || activeTools.has("bash");
       runtimeState.toolsRestricted = !hasMutatingTool;
+      if (hasMutatingTool) runtimeState.toolsRestrictedContinuationNotified = false;
     });
     pi.on("input", (event) => {
       if (event.source === "extension" || !currentGoal) return { action: "continue" };
@@ -561,7 +575,7 @@ export function createGoalExtension(options: GoalExtensionOptions = {}) {
       });
       if (lastAssistant) onRecoverySuccessfulTurn(runtimeState.recovery, lastAssistant);
 
-      ensurePendingContinuation(pi, ctx);
+      if (!ensurePendingContinuation(pi, ctx)) notifyToolsRestrictedContinuationBlocked(ctx);
       syncGoalTools(pi);
       refreshStatus(ctx);
     });

@@ -304,7 +304,7 @@ test("pending messages block continuation delivery until a later settled retry",
   assert.equal(pi.messages.filter((m) => m.message?.customType === "pi-goal-continuation").length, 1);
 });
 
-test("read-only active tool restrictions block continuation scheduling", async () => {
+test("read-only active tool restrictions block continuation scheduling and warn once", async () => {
   const scheduled: Function[] = [];
   const pi = fakePi();
   createGoalExtension({ scheduler: (fn) => scheduled.push(fn) }).register(pi as never);
@@ -315,8 +315,10 @@ test("read-only active tool restrictions block continuation scheduling", async (
   pi.setActiveTools(["read"]);
   await pi.handlers.before_agent_start[0]({ prompt: "normal prompt" }, ctx);
   await pi.handlers.agent_end[0]({ messages: [] }, ctx);
+  await pi.handlers.agent_end[0]({ messages: [] }, ctx);
 
   assert.equal(scheduled.length, 0);
+  assert.equal(ctx.notifications.filter((message) => /mutating tools are unavailable/i.test(message)).length, 1);
 });
 
 test("pending recovery blocks automatic continuation", async () => {
@@ -479,6 +481,32 @@ test("goal resume schedules a hidden continuation when idle", async () => {
   assert.equal(pi.messages.at(-1)?.message.customType, "pi-goal-event");
   scheduled[0]();
   assert.equal(pi.messages.at(-1)?.message.customType, "pi-goal-continuation");
+});
+
+test("goal resume reactivates budget-limited and suppressed active goals", async () => {
+  const scheduled: Function[] = [];
+  const pi = fakePi();
+  createGoalExtension({ scheduler: (fn) => scheduled.push(fn), clock: () => 100 }).register(pi as never);
+  const budgetLimited = activeGoal({ goalId: "budget", status: "budget_limited", tokenBudget: 10, tokensUsed: 10 });
+  const budgetCtx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal: budgetLimited, at: 1 } }]);
+
+  await pi.handlers.session_start[0]({}, budgetCtx);
+  await pi.commands.goal.handler("resume", budgetCtx);
+
+  assert.equal((pi.entries.at(-1)?.data as any).goal.status, "active");
+  assert.equal(scheduled.length, 1);
+
+  const piSuppressed = fakePi();
+  const suppressedScheduled: Function[] = [];
+  createGoalExtension({ scheduler: (fn) => suppressedScheduled.push(fn), clock: () => 100 }).register(piSuppressed as never);
+  const suppressed = activeGoal({ continuationSuppressed: true, lastContinuationHadToolCall: false });
+  const suppressedCtx = fakeCtx([{ type: "custom", customType: ENTRY_TYPE, data: { version: 1, action: "set", goal: suppressed, at: 1 } }]);
+
+  await piSuppressed.handlers.session_start[0]({}, suppressedCtx);
+  await piSuppressed.commands.goal.handler("resume", suppressedCtx);
+
+  assert.equal((piSuppressed.entries.at(-1)?.data as any).goal.continuationSuppressed, false);
+  assert.equal(suppressedScheduled.length, 1);
 });
 
 test("/goal resume clears recovery attention and allows continuation", async () => {

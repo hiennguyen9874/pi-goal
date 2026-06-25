@@ -12,6 +12,7 @@ export interface GoalRuntimeState {
   currentTurnIsContinuation: boolean;
   pendingCompletionGoalId: string | null;
   toolsRestricted: boolean;
+  toolsRestrictedContinuationNotified: boolean;
   currentTurnQueuedGoalId: string | null;
   currentTurnIsStaleQueuedWork: boolean;
   recovery: GoalRecoveryMachineState;
@@ -32,6 +33,7 @@ export function createGoalRuntimeState(): GoalRuntimeState {
     currentTurnIsContinuation: false,
     pendingCompletionGoalId: null,
     toolsRestricted: false,
+    toolsRestrictedContinuationNotified: false,
     currentTurnQueuedGoalId: null,
     currentTurnIsStaleQueuedWork: false,
     recovery: createGoalRecoveryMachine(),

@@ -24,6 +24,16 @@ function budgetLines(goal: GoalState): string[] {
   ];
 }
 
+function compactCoreInvariantLines(): string[] {
+  return [
+    "Core invariants:",
+    "- Keep the full objective intact; do not redefine success around partial progress or what is easiest to finish now.",
+    "- Use current workspace and external evidence before relying on memory or prior conversation context.",
+    "- Choose actions that move the actual requested end state closer to true, not a narrower compatible substitute.",
+    "- Only call update_goal when current evidence proves every requirement is complete; if anything is missing or unverified, keep working.",
+  ];
+}
+
 export function initPrompt(goal: GoalState): string {
   return [
     `<pi_goal_init goal_id="${goal.goalId}">`,
@@ -137,8 +147,8 @@ export function compactContinuationPrompt(goal: GoalState): string {
     "</untrusted_objective>",
     "Budget:",
     ...budgetLines(goal),
+    ...compactCoreInvariantLines(),
     "Avoid repeating work that is already done. Choose the next concrete action toward the objective.",
-    "Only call update_goal when concrete evidence proves the full objective is complete. If any requirement is missing, incomplete, or unverified, keep working.",
     "</pi_goal_continuation>",
   ].join("\n");
 }
